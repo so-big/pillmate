@@ -1,14 +1,15 @@
 // lib/createAccount.dart
 
 import 'package:flutter/material.dart';
-import 'dart:io'; // สำหรับการทำงานกับไฟล์ (File I/O)
-import 'dart:convert'; // สำหรับการแปลง JSON
+import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart'; // สำหรับหาที่เก็บไฟล์
+// import 'package:path_provider/path_provider.dart'; // ไม่ต้องใช้แล้วเพราะย้ายไป Helper
+import 'database_helper.dart'; // เรียกใช้ไฟล์ Database ที่สร้างใหม่
 
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({super.key});
@@ -41,12 +42,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
   final ImagePicker _picker = ImagePicker();
 
-  // 1. ฟังก์ชันหาตำแหน่งของไฟล์
-  Future<File> get _localFile async {
-    // หาตำแหน่งที่เก็บข้อมูลของแอปพลิเคชัน
-    final directory = await getApplicationDocumentsDirectory();
-    return File('${directory.path}/user.json');
-  }
+  // เรียกใช้ Helper Database
+  final dbHelper = DatabaseHelper();
+
+  // (ลบ Future<File> get _localFile ทิ้ง เพราะไม่ใช้ JSON แล้ว)
 
   // โหลด asset image → base64
   Future<String> _loadAssetAsBase64(String assetPath) async {
@@ -252,45 +251,30 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     );
   }
 
-  // 2. ฟังก์ชันบันทึกข้อมูลผู้ใช้
+  // 2. ฟังก์ชันบันทึกข้อมูลผู้ใช้ (เปลี่ยนจาก JSON File -> SQLite)
   Future<void> _saveUser(String username, String password) async {
     try {
-      final file = await _localFile;
-      String fileContent = await file.exists()
-          ? await file.readAsString()
-          : '[]';
+      // ตรวจสอบว่ามี User นี้อยู่แล้วหรือไม่
+      final existingUser = await dbHelper.getUser(username);
 
-      // แปลงเนื้อหาไฟล์เดิมเป็น List
-      List<dynamic> userList;
-      try {
-        userList = jsonDecode(fileContent);
-      } catch (e) {
-        // จัดการกรณีที่ไฟล์มีอยู่แต่ JSON เสียหาย
-        userList = [];
-      }
-
-      // ตรวจสอบว่า Username นี้มีอยู่แล้วหรือไม่
-      if (userList.any((user) => user['userid'] == username)) {
+      if (existingUser != null) {
         setState(() {
           _message = 'Error: Username already exists!';
         });
         return;
       }
 
-      // สร้างชุดข้อมูลผู้ใช้ใหม่
-      final newUser = {
+      // เตรียมข้อมูลลง SQLite (ตามคอลัมน์ที่คุณระบุ: userid, create_at, image_base64)
+      // **หมายเหตุ:** ผมใส่ password ลงไปด้วยเพื่อให้ Login ได้ ถ้าตารางไม่มีให้ลบบรรทัด password ออกครับ
+      Map<String, dynamic> newUser = {
         'userid': username,
-        'password': password, // ในแอปจริงควร HASH รหัสผ่านก่อนบันทึก!
+        'password': password,
         'created_at': DateTime.now().toIso8601String(),
-        'image': _selectedBase64Image ?? '', // รูปโปรไฟล์ base64
+        'image_base64': _selectedBase64Image ?? '',
       };
 
-      // เพิ่มผู้ใช้ใหม่ลงใน List
-      userList.add(newUser);
-
-      // บันทึก List ที่อัปเดตแล้วกลับไปที่ไฟล์
-      final jsonString = jsonEncode(userList);
-      await file.writeAsString(jsonString);
+      // บันทึกลง SQLite
+      await dbHelper.insertUser(newUser);
 
       setState(() {
         _message = 'Success! Account created for $username';
@@ -362,7 +346,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
                   // 1. Username Field
                   TextFormField(
-                    style: const TextStyle(color: Colors.black),
+                    style: const TextStyle(
+                      color: Colors.black,
+                    ), // Style เดิมของคุณ
                     controller: _usernameController,
                     decoration: const InputDecoration(
                       labelText: 'Username (User ID)',
@@ -379,7 +365,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
                   // 2. Password Field
                   TextFormField(
-                    style: const TextStyle(color: Colors.black),
+                    style: const TextStyle(
+                      color: Colors.black,
+                    ), // Style เดิมของคุณ
                     controller: _passwordController,
                     obscureText: true,
                     decoration: const InputDecoration(
@@ -397,7 +385,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
                   // 3. Confirm Password Field
                   TextFormField(
-                    style: const TextStyle(color: Colors.black),
+                    style: const TextStyle(
+                      color: Colors.black,
+                    ), // Style เดิมของคุณ
                     controller: _confirmPasswordController,
                     obscureText: true,
                     decoration: const InputDecoration(

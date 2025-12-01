@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'forgotPassword.dart';
 import 'createAccount.dart';
 import 'dashboard.dart';
+import 'database_helper.dart'; // <--- 1. เพิ่ม Import นี้เข้ามา
 
 void main() {
   runApp(const MyApp());
@@ -81,15 +82,16 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
+  // เรียกใช้ Database Helper
+  final dbHelper = DatabaseHelper();
+
   Future<Directory> _appDir() async {
     return getApplicationDocumentsDirectory();
   }
 
-  Future<File> _userFile() async {
-    final dir = await _appDir();
-    return File('${dir.path}/user.json');
-  }
+  // (ลบ _userFile() ออก เพราะไม่ใช้ user.json แล้ว)
 
+  // ยังใช้ไฟล์นี้สำหรับเก็บสถานะ Remember Me เหมือนเดิม (แยกจาก Database หลัก)
   Future<File> _userStatFile() async {
     final dir = await _appDir();
     return File('${dir.path}/user-stat.json');
@@ -150,34 +152,34 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  // --------------------------------------------------------------------------
+  // ✅ แก้ไขส่วนนี้: เปลี่ยนจากอ่านไฟล์ JSON เป็นเรียกผ่าน DatabaseHelper (SQLite)
+  // --------------------------------------------------------------------------
   Future<Map<String, dynamic>?> _findUser(
     String username,
     String password,
   ) async {
     try {
-      final file = await _userFile();
-      if (!await file.exists()) return null;
+      // 1. ดึงข้อมูล User จาก SQLite ตาม username
+      final user = await dbHelper.getUser(username);
 
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return null;
-
-      final list = jsonDecode(content);
-      if (list is! List) return null;
-
-      for (final u in list) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          if (map['userid'] == username && map['password'] == password) {
-            return map;
-          }
-        }
+      // 2. ถ้าไม่มี User หรือ รหัสผ่านไม่ตรงกัน
+      if (user == null) {
+        return null;
       }
-      return null;
+
+      // 3. เช็ครหัสผ่าน (user['password'] มาจาก SQLite)
+      if (user['password'] == password) {
+        return user;
+      } else {
+        return null; // รหัสผิด
+      }
     } catch (e) {
-      debugPrint('Error reading user.json: $e');
+      debugPrint('Error reading from SQLite: $e');
       return null;
     }
   }
+  // --------------------------------------------------------------------------
 
   Future<void> _handleLogin({bool auto = false}) async {
     final username = _usernameController.text.trim();
@@ -211,7 +213,7 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // ล็อกอินสำเร็จ → บันทึก rememberMe
+    // ล็อกอินสำเร็จ → บันทึก rememberMe (บันทึกลงไฟล์ local เหมือนเดิมเพื่อความสะดวกในการเปิดแอปรอบหน้า)
     await _saveUserStat(
       username: username,
       password: password,
