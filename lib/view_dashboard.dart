@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'nortification_setup.dart';
 import 'view_carlendar.dart';
 import 'add_carlendar.dart';
-import 'edit_carlendar.dart'; // หน้าแก้ไข
+import 'edit_carlendar.dart';
 import 'create_profile.dart';
 import 'manage_profile.dart';
 import 'view_menu.dart';
@@ -46,7 +46,6 @@ class _DoseItem {
 
 class _DashboardPageState extends State<DashboardPage> {
   // ---------- FILE HELPERS ----------
-  // (เหลือไว้แค่ appstatus.json และ user-stat.json ที่ยังใช้ไฟล์อยู่)
 
   Future<Directory> _appDir() async {
     return getApplicationDocumentsDirectory();
@@ -91,8 +90,11 @@ class _DashboardPageState extends State<DashboardPage> {
   late DateTime _baseDate;
   late PageController _pageController;
 
-  // ✅ ตัวแปรสถานะ NFC
+  // ✅ ตัวแปรสถานะ NFC (สำหรับแสดงผล UI เท่านั้น Logic จริงจะอ่านไฟล์)
   bool _isNfcEnabled = false;
+
+  // ✅ Timer สำหรับจับเวลาการกดค้าง (Manual Mode)
+  Timer? _manualHoldTimer;
 
   // ✅ Database Helper
   final dbHelper = DatabaseHelper();
@@ -107,18 +109,29 @@ class _DashboardPageState extends State<DashboardPage> {
     _baseDate = _selectedDateTime;
     _pageController = PageController(initialPage: _initialPage);
 
-    _loadNfcStatus(); // ✅ โหลดสถานะ NFC
+    _loadInitialNfcStatus(); // โหลดสถานะเริ่มต้นเพื่อแสดงผล
     _loadInitialData();
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _manualHoldTimer?.cancel(); // ยกเลิก Timer ถ้าออกจากหน้า
     super.dispose();
   }
 
-  // ✅ โหลดค่า NFC Status
-  Future<void> _loadNfcStatus() async {
+  // โหลดค่า NFC Status ครั้งแรกเพื่อใช้แสดงผล Text ใน UI
+  Future<void> _loadInitialNfcStatus() async {
+    final status = await _getNfcStatusFromFile();
+    if (mounted) {
+      setState(() {
+        _isNfcEnabled = status;
+      });
+    }
+  }
+
+  // ✅ ฟังก์ชันอ่านสถานะ NFC จากไฟล์ appstatus.json โดยตรง (ใช้ตรวจสอบ Logic)
+  Future<bool> _getNfcStatusFromFile() async {
     try {
       final file = await _appStatusFile();
       if (await file.exists()) {
@@ -126,15 +139,14 @@ class _DashboardPageState extends State<DashboardPage> {
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content);
           if (data is Map) {
-            setState(() {
-              _isNfcEnabled = data['nfc_enabled'] ?? false;
-            });
+            return data['nfc_enabled'] ?? false;
           }
         }
       }
     } catch (e) {
-      debugPrint('Dashboard: error loading NFC status: $e');
+      debugPrint('Dashboard: error reading NFC status file: $e');
     }
+    return false; // Default ถ้าอ่านไม่ได้ หรือไฟล์ไม่มี
   }
 
   Future<void> _loadInitialData() async {
@@ -298,7 +310,6 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // ฟังก์ชัน Logout (เหมือนเดิม แต่ใช้ user-stat.json)
   Future<void> _handleLogout() async {
     try {
       final file = await _userStatFile();
@@ -317,7 +328,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _openAddReminderSheet() async {
-    // เปิดหน้า Add Carlendar
     final result = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -340,7 +350,7 @@ class _DashboardPageState extends State<DashboardPage> {
       },
     );
 
-    // เมื่อกลับมา ให้โหลดข้อมูลใหม่ (เพราะหน้า Add บันทึก DB เองแล้ว)
+    // เมื่อกลับมา ให้โหลดข้อมูลใหม่
     if (result != null) {
       await _loadReminders();
       await NortificationSetup.run(context: context, username: widget.username);
@@ -348,17 +358,12 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _openEditReminderSheet(Map<String, dynamic> reminder) async {
-    // (ยังไม่ได้แก้หน้า EditCalendar แต่เตรียมไว้)
-    // final result = await showModalBottomSheet(...);
-    // if (result != null) await _loadReminders();
-
-    // ชั่วคราว: ใส่ Log ไว้ก่อน เพราะคุณยังไม่ส่งไฟล์ edit_carlendar มา
+    // (ยังรอไฟล์ edit_carlendar)
     debugPrint("Open Edit Reminder: Not implemented yet fully");
   }
 
   // ---------- PASSWORD VERIFY / CLEAR TAKEN ----------
 
-  // ✅ แก้ไข: เช็ครหัสผ่านจาก SQLite
   Future<bool> _verifyPassword(String inputPassword) async {
     try {
       final user = await dbHelper.getUser(widget.username);
@@ -461,7 +466,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ✅ แก้ไข: ลบประวัติการกินจาก SQLite
   Future<void> _clearTakenForReminder(
     Map<String, dynamic> reminder,
     DateTime? time,
@@ -488,7 +492,6 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
       );
 
-      // โหลดข้อมูลใหม่
       await _loadEated();
       await NortificationSetup.run(context: context, username: widget.username);
     } catch (e) {
@@ -500,7 +503,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // ---------- UTILS (DATE / TIME / DOSES) ----------
+  // ---------- UTILS ----------
 
   String _formatDate(DateTime dt) {
     final d = dt.day.toString().padLeft(2, '0');
@@ -589,7 +592,7 @@ class _DashboardPageState extends State<DashboardPage> {
     return result;
   }
 
-  // ---------- NFC / TAKEN BY NFC ----------
+  // ---------- CHECK DOSE ----------
 
   String? _doseKey(Map<String, dynamic> reminder, DateTime? time) {
     if (time == null) return null;
@@ -610,7 +613,7 @@ class _DashboardPageState extends State<DashboardPage> {
     return key == _scanningDoseKey;
   }
 
-  // ✅ แก้ไข: บันทึกสถานะกินยาลง SQLite
+  // ✅ บันทึกว่ากินยาแล้ว (ลง SQLite)
   Future<void> _markDoseTaken(
     Map<String, dynamic> reminder,
     DateTime? time,
@@ -655,61 +658,18 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // ✅ แก้ไข: ปรับ Logic สแกน NFC ตาม Status
+  // ---------- ACTION LOGIC ----------
+
+  // ✅ ฟังก์ชันสแกน NFC (สำหรับโหมดใช้ NFC เท่านั้น)
   Future<void> _scanDoseWithNfc(
     Map<String, dynamic> reminder,
     DateTime? time,
   ) async {
     if (time == null) return;
-
     final doseKey = _doseKey(reminder, time);
     if (doseKey == null) return;
 
-    // ตรวจสอบว่าโดสนี้ถูกกินไปแล้วหรือไม่
-    final isTaken = _isDoseTaken(reminder, time);
-
-    // --- [ส่วนที่ 1: จัดการกรณีที่ "กินแล้ว" -> ให้ยกเลิกสถานะ] ---
-    if (isTaken) {
-      final ok = await _showClearTakenConfirmDialog();
-      if (ok == true) {
-        await _clearTakenForReminder(reminder, time);
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('ยกเลิกการเคลียร์สถานะ')));
-      }
-      return;
-    }
-    // --- [สิ้นสุด ส่วนที่ 1] ---
-
-    // --- [ส่วนที่ 2: จัดการกรณีที่ "ยังไม่ได้กิน" -> ให้บันทึกสถานะ] ---
-
-    // ✅ Logic ใหม่: เช็คตามตัวแปร _isNfcEnabled
-    if (!_isNfcEnabled) {
-      debugPrint('Dashboard: NFC disabled in settings. Skipping scan.');
-
-      // Mark as taken immediately (Manual/PC Mode)
-      await _markDoseTaken(reminder, time);
-
-      if (!mounted) return;
-      await _showAutoDismissDialog(
-        'บันทึกสำเร็จ (ปิด NFC)',
-        'ยืนยันการกินยาเรียบร้อยแล้ว (โหมดไม่ใช้ NFC)',
-      );
-
-      if (mounted) {
-        setState(() {
-          _isScanningNfc = false;
-          _scanningDoseKey = null;
-        });
-      }
-      return;
-    }
-    // --- [สิ้นสุด โหมดปิด NFC] ---
-
-    // โค้ดเดิม: จัดการการสแกน NFC
-
+    // ถ้ากำลังสแกนการ์ดใบเดิมอยู่ -> ยกเลิกการสแกน
     if (_isScanningNfc && _scanningDoseKey == doseKey) {
       try {
         await FlutterNfcKit.finish(iosErrorMessage: 'ยกเลิกการสแกน');
@@ -1021,13 +981,71 @@ class _DashboardPageState extends State<DashboardPage> {
       elevation: 2,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => _scanDoseWithNfc(r, item.time),
+        // ✅ Logic การแตะ: อ่านไฟล์สถานะล่าสุดก่อนทำงานเสมอ
+        onTap: () async {
+          if (isTaken) return;
+
+          // 1. อ่านสถานะ NFC ล่าสุดจากไฟล์
+          final realTimeNfcStatus = await _getNfcStatusFromFile();
+          if (mounted) {
+            setState(() {
+              _isNfcEnabled = realTimeNfcStatus;
+            });
+          }
+
+          // 2. แยกการทำงานตามโหมด
+          if (realTimeNfcStatus) {
+            // โหมด NFC: สแกน
+            _scanDoseWithNfc(r, item.time);
+          } else {
+            // โหมด Manual: แจ้งเตือนให้กดค้าง
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('กดค้างไว้ 2 วินาทีเพื่อยืนยันการกินยา'),
+              ),
+            );
+          }
+        },
+        // ✅ Logic การกดค้าง (สำหรับ Manual Mode)
+        onTapDown: (_) {
+          if (isTaken) return;
+
+          // เริ่มจับเวลา 2 วินาที
+          _manualHoldTimer = Timer(const Duration(seconds: 2), () async {
+            // เมื่อครบ 2 วินาที ตรวจสอบสถานะจากไฟล์อีกครั้งเพื่อความชัวร์
+            final realTimeNfcStatus = await _getNfcStatusFromFile();
+            if (mounted) {
+              setState(() {
+                _isNfcEnabled = realTimeNfcStatus;
+              });
+            }
+
+            // ถ้ายังเป็นโหมด Manual (ปิด NFC) ให้บันทึก
+            if (!realTimeNfcStatus) {
+              await _markDoseTaken(r, item.time);
+              if (mounted) {
+                await _showAutoDismissDialog(
+                  'บันทึกสำเร็จ',
+                  'ยืนยันการกินยาเรียบร้อยแล้ว (Manual Mode)',
+                );
+              }
+            }
+          });
+        },
+        onTapUp: (_) {
+          // ปล่อยนิ้ว -> ยกเลิก timer
+          _manualHoldTimer?.cancel();
+        },
+        onTapCancel: () {
+          // ลากนิ้วออก -> ยกเลิก timer
+          _manualHoldTimer?.cancel();
+        },
         child: Padding(
           padding: const EdgeInsets.all(8.0),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ซ้าย: รูปโปรไฟล์ + ปุ่ม edit / clear (แนวตั้ง)
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1054,7 +1072,6 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
               const SizedBox(width: 12),
-              // ขวา: ข้อความทั้งหมด
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1121,9 +1138,15 @@ class _DashboardPageState extends State<DashboardPage> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      'แตะการ์ดเพื่อสแกน NFC ยา\n(แตะซ้ำที่การ์ดเดิมเพื่อยกเลิกการสแกน)',
-                      style: TextStyle(fontSize: 11, color: Colors.black38),
+                    // คำอธิบายเปลี่ยนตามโหมด
+                    Text(
+                      _isNfcEnabled
+                          ? 'แตะการ์ดเพื่อสแกน NFC ยา'
+                          : 'กดค้างไว้ 2 วินาที เพื่อยืนยันการกินยา',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.black38,
+                      ),
                     ),
                   ],
                 ),

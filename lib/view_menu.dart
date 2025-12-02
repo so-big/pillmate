@@ -190,6 +190,9 @@ class _LeftMenuState extends State<LeftMenu> {
 
       await file.writeAsString(jsonEncode(data));
       debugPrint('Saved NFC status: $value to appstatus.json');
+
+      // ✅ สั่ง Refresh Dashboard ทันที
+      widget.onShowDashboard();
     } catch (e) {
       debugPrint('LeftMenu: error saving NFC status: $e');
     }
@@ -403,7 +406,7 @@ class _LeftMenuState extends State<LeftMenu> {
                   ),
                   value: _isNfcEnabled,
                   onChanged: (bool value) async {
-                    // 1. บันทึกค่า
+                    // 1. บันทึกค่า และ Refresh Dashboard
                     await _toggleNfc(value);
                     // 2. แสดง Dialog แจ้งเตือน
                     if (context.mounted) {
