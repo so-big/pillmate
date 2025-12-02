@@ -1,4 +1,4 @@
-// lib/medicine_manage.dart
+// lib/manage_medicine.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -6,8 +6,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'medicine_add.dart';
-import 'editMedicine.dart';
+import 'add_medicine.dart';
+import 'edit_medicine.dart';
 
 class MedicineManagePage extends StatefulWidget {
   final String username;

@@ -1,4 +1,4 @@
-// lib/createAccount.dart
+// lib/create_account.dart
 
 import 'package:flutter/material.dart';
 import 'dart:io';

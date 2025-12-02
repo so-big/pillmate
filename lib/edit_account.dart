@@ -1,14 +1,15 @@
-// lib/editAccount.dart
+// lib/edit_account.dart
 
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
+
+// 1. นำเข้า DatabaseHelper
+import 'database_helper.dart';
 
 class EditAccountPage extends StatefulWidget {
   final String username;
@@ -42,40 +43,31 @@ class _EditAccountPageState extends State<EditAccountPage> {
 
   final ImagePicker _picker = ImagePicker();
 
+  // 2. ประกาศตัวแปร dbHelper
+  final dbHelper = DatabaseHelper();
+
   @override
   void initState() {
     super.initState();
     _loadAccount();
   }
 
-  Future<File> _usersFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/user.json');
-  }
+  // ลบฟังก์ชัน _usersFile() ทิ้ง เพราะไม่ใช้ไฟล์ JSON แล้ว
 
+  // 3. แก้ไขการโหลดข้อมูลจาก SQLite
   Future<void> _loadAccount() async {
     try {
-      final file = await _usersFile();
-      if (!await file.exists()) return;
+      final user = await dbHelper.getUser(widget.username);
 
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return;
-
-      final list = jsonDecode(content);
-      if (list is! List) return;
-
-      for (final u in list) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          if (map['userid'] == widget.username) {
-            setState(() {
-              _accountUser = map;
-              _selectedBase64Image = map['image']?.toString();
-              _selectedAvatarIndex = null;
-            });
-            break;
-          }
-        }
+      if (user != null) {
+        setState(() {
+          // ต้องสร้าง copy map เพื่อให้แน่ใจว่าแก้ไขได้ (Mutable)
+          _accountUser = Map<String, dynamic>.from(user);
+          _selectedBase64Image = user['image']?.toString();
+          _selectedAvatarIndex = null;
+        });
+      } else {
+        debugPrint('User not found in DB');
       }
     } catch (e) {
       debugPrint('Error loading account in EditAccountPage: $e');
@@ -101,9 +93,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
       });
     } catch (e) {
       debugPrint('Error loading avatar asset in EditAccount: $e');
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('โหลดรูปโปรไฟล์ไม่สำเร็จ')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('โหลดรูปโปรไฟล์ไม่สำเร็จ')),
+        );
+      }
     }
   }
 
@@ -174,9 +168,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
       });
     } catch (e) {
       debugPrint('Error picking image from gallery in EditAccount: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('เลือกรูปจากเครื่องไม่สำเร็จ')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('เลือกรูปจากเครื่องไม่สำเร็จ')),
+        );
+      }
     }
   }
 
@@ -215,25 +211,12 @@ class _EditAccountPageState extends State<EditAccountPage> {
     return child;
   }
 
+  // 4. แก้ไขการตรวจสอบรหัสผ่านเดิมจาก SQLite
   Future<bool> _validateOldPassword(String oldPassword) async {
     try {
-      final file = await _usersFile();
-      if (!await file.exists()) return false;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return false;
-
-      final list = jsonDecode(content);
-      if (list is! List) return false;
-
-      for (final u in list) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          if (map['userid'] == widget.username &&
-              map['password'] == oldPassword) {
-            return true;
-          }
-        }
+      final user = await dbHelper.getUser(widget.username);
+      if (user != null && user['password'] == oldPassword) {
+        return true;
       }
       return false;
     } catch (e) {
@@ -369,40 +352,40 @@ class _EditAccountPageState extends State<EditAccountPage> {
     );
   }
 
+  // 5. แก้ไขการบันทึกข้อมูลลง SQLite
   Future<void> _applyAccountChanges(String? newPassword) async {
     setState(() {
       _isSaving = true;
     });
 
     try {
-      final file = await _usersFile();
-      if (!await file.exists()) return;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return;
-
-      final list = jsonDecode(content);
-      if (list is! List) return;
-
-      for (int i = 0; i < list.length; i++) {
-        final u = list[i];
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          if (map['userid'] == widget.username) {
-            if (newPassword != null) {
-              map['password'] = newPassword;
-            }
-            map['image'] = _selectedBase64Image ?? map['image'] ?? '';
-            list[i] = map;
-            break;
-          }
-        }
+      if (_accountUser == null) {
+        // กรณีโหลดไม่สำเร็จตั้งแต่แรก
+        throw Exception('User data is null');
       }
 
-      await file.writeAsString(jsonEncode(list));
+      // สร้าง Map ใหม่สำหรับเตรียมอัปเดต
+      final Map<String, dynamic> updatedUser = Map<String, dynamic>.from(
+        _accountUser!,
+      );
+
+      // อัปเดตรหัสผ่านถ้ามีการเปลี่ยน
+      if (newPassword != null) {
+        updatedUser['password'] = newPassword;
+      }
+
+      // อัปเดตรูปภาพ
+      updatedUser['image'] = _selectedBase64Image ?? updatedUser['image'] ?? '';
+
+      // เรียกใช้ updateUser ใน DatabaseHelper
+      await dbHelper.updateUser(updatedUser);
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context); // ปิดหน้า EditAccountPage
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('แก้ไขข้อมูลสำเร็จ')));
     } catch (e) {
       debugPrint('Error applying account changes: $e');
       if (!mounted) return;
@@ -427,6 +410,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
 
   @override
   Widget build(BuildContext context) {
+    // โค้ด UI เหมือนเดิมทั้งหมด
     final usernameText = widget.username;
 
     return Scaffold(

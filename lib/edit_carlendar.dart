@@ -1,4 +1,4 @@
-// lib/carlendar_edit.dart
+// lib/edit_carlendar.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -8,8 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'createProfile.dart';
-import 'medicine_add.dart';
+import 'create_profile.dart';
+import 'add_medicine.dart';
 
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:ndef/ndef.dart' as ndef;
@@ -92,8 +92,8 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
     _selectedProfileName =
         (r['profileName']?.toString().trim().isNotEmpty ?? false)
-            ? r['profileName'].toString()
-            : widget.username;
+        ? r['profileName'].toString()
+        : widget.username;
 
     final startStr = r['startDateTime']?.toString();
     final endStr = r['endDateTime']?.toString();
@@ -987,7 +987,8 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       );
       nfcWriteSuccess = true;
       // ใช้ ID เดิม หรือ สร้าง dummy
-      nfcTagId = original['nfcId']?.toString() ??
+      nfcTagId =
+          original['nfcId']?.toString() ??
           'PC-MODE-${DateTime.now().millisecondsSinceEpoch}';
     } else {
       // โหมด Mobile (NFC)
@@ -1136,9 +1137,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('แก้ไขการแจ้งเตือนเรียบร้อย'),
-        ),
+        const SnackBar(content: Text('แก้ไขการแจ้งเตือนเรียบร้อย')),
       );
 
       setState(() {
@@ -1170,9 +1169,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     } catch (e) {
       debugPrint('CarlendarEdit: File save error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ไม่สามารถบันทึกไฟล์ได้: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('ไม่สามารถบันทึกไฟล์ได้: $e')));
         setState(() {
           _isSaving = false;
         });
@@ -1190,7 +1189,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       child: Material(
         color: Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        
+
         // --- 1. ครอบ ScrollConfiguration ---
         child: ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(
@@ -1203,7 +1202,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
             controller: widget.scrollController,
             // --- 2. บังคับ Physics ---
             physics: const AlwaysScrollableScrollPhysics(),
-            
+
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
               // แถบลาก
@@ -1369,7 +1368,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      icon: const Icon(Icons.access_time, color: Colors.black87),
+                      icon: const Icon(
+                        Icons.access_time,
+                        color: Colors.black87,
+                      ),
                       label: Text(
                         _formatTime(_startDateTime),
                         style: const TextStyle(
@@ -1435,7 +1437,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      icon: const Icon(Icons.access_time, color: Colors.black87),
+                      icon: const Icon(
+                        Icons.access_time,
+                        color: Colors.black87,
+                      ),
                       label: Text(
                         _formatTime(_endDateTime),
                         style: const TextStyle(

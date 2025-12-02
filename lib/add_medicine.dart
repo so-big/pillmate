@@ -1,4 +1,4 @@
-// lib/editMedicine.dart
+// lib/add_medicine.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -7,29 +7,25 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 
-class EditMedicinePage extends StatefulWidget {
+class MedicineAddPage extends StatefulWidget {
   final String username;
-  final Map<String, dynamic> medicine;
 
-  const EditMedicinePage({
-    super.key,
-    required this.username,
-    required this.medicine,
-  });
+  const MedicineAddPage({super.key, required this.username});
 
   @override
-  State<EditMedicinePage> createState() => _EditMedicinePageState();
+  State<MedicineAddPage> createState() => _MedicineAddPageState();
 }
 
-class _EditMedicinePageState extends State<EditMedicinePage> {
+class _MedicineAddPageState extends State<MedicineAddPage> {
   final _formKey = GlobalKey<FormState>();
 
-  late TextEditingController _nameController;
-  late TextEditingController _detailController;
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _detailController = TextEditingController();
 
   bool _beforeMeal = true;
   bool _afterMeal = false;
 
+  // รูป default จาก assets
   final List<String> _pillImages = const [
     'assets/pill/p_1.png',
     'assets/pill/p_2.png',
@@ -39,6 +35,8 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
   ];
 
   late String _selectedImage;
+
+  // base64 ของรูปจากเครื่อง
   String? _customImageBase64;
 
   bool _isSaving = false;
@@ -46,30 +44,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
   @override
   void initState() {
     super.initState();
-
-    final m = widget.medicine;
-
-    _nameController = TextEditingController(text: (m['name'] ?? '').toString());
-    _detailController = TextEditingController(
-      text: (m['detail'] ?? '').toString(),
-    );
-
-    _beforeMeal = (m['beforeMeal'] == true);
-    _afterMeal = (m['afterMeal'] == true);
-
-    final img = m['image'];
-    if (img is String && img.isNotEmpty) {
-      if (_pillImages.contains(img)) {
-        _selectedImage = img;
-        _customImageBase64 = null;
-      } else {
-        _selectedImage = _pillImages.first;
-        _customImageBase64 = img;
-      }
-    } else {
-      _selectedImage = _pillImages.first;
-      _customImageBase64 = null;
-    }
+    _selectedImage = _pillImages.first;
   }
 
   bool get _usingCustomImage => _customImageBase64 != null;
@@ -77,11 +52,6 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
   Future<File> get _pillProfileFile async {
     final dir = await getApplicationDocumentsDirectory();
     return File('${dir.path}/pillprofile.json');
-  }
-
-  Future<File> get _usersFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/user.json');
   }
 
   /// อ่าน / สร้าง list จากไฟล์ pillprofile.json
@@ -95,7 +65,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
           final decoded = jsonDecode(content);
           if (decoded is List) list = decoded;
         } catch (e) {
-          debugPrint('editMedicine: JSON decode error: $e');
+          debugPrint('medicine_add: JSON decode error: $e');
         }
       }
     }
@@ -122,7 +92,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
         _customImageBase64 = base64Str;
       });
     } catch (e) {
-      debugPrint('editMedicine: pick image error: $e');
+      debugPrint('medicine_add: pick image error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('เกิดข้อผิดพลาดในการเลือกรูปภาพ')),
@@ -130,118 +100,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
     }
   }
 
-  Future<bool> _verifyPassword(String inputPassword) async {
-    try {
-      final file = await _usersFile;
-      if (!await file.exists()) return false;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return false;
-
-      final decoded = jsonDecode(content);
-      if (decoded is! List) return false;
-
-      for (final u in decoded) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          final userid = map['userid']?.toString();
-          final password = map['password']?.toString();
-          if (userid == widget.username && password == inputPassword) {
-            return true;
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('editMedicine: verifyPassword error: $e');
-    }
-    return false;
-  }
-
-  Future<bool?> _showPasswordConfirmDialog() async {
-    final controller = TextEditingController();
-    bool isChecking = false;
-    String? errorText;
-
-    return showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setStateDialog) {
-            Future<void> onConfirm() async {
-              final pwd = controller.text.trim();
-              if (pwd.isEmpty) {
-                setStateDialog(() {
-                  errorText = 'กรุณากรอกรหัสผ่าน';
-                });
-                return;
-              }
-
-              setStateDialog(() {
-                isChecking = true;
-                errorText = null;
-              });
-
-              final ok = await _verifyPassword(pwd);
-
-              setStateDialog(() {
-                isChecking = false;
-              });
-
-              if (ok) {
-                Navigator.of(ctx).pop(true);
-              } else {
-                setStateDialog(() {
-                  errorText = 'รหัสผ่านไม่ถูกต้อง';
-                });
-              }
-            }
-
-            return AlertDialog(
-              title: const Text(
-                'ยืนยันรหัสผ่าน',
-                style: TextStyle(color: Colors.black),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: controller,
-                    obscureText: true,
-                    style: const TextStyle(color: Colors.black87),
-                    decoration: InputDecoration(
-                      labelText: 'รหัสผ่าน',
-                      labelStyle: const TextStyle(color: Colors.black87),
-                      errorText: errorText,
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: isChecking
-                      ? null
-                      : () => Navigator.of(ctx).pop(false),
-                  child: const Text('ยกเลิก'),
-                ),
-                TextButton(
-                  onPressed: isChecking ? null : onConfirm,
-                  child: isChecking
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('ยืนยัน'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
+  /// บันทึกข้อมูลตัวยาลง JSON
   Future<void> _saveMedicine() async {
     if (_isSaving) return;
 
@@ -267,13 +126,6 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
       return;
     }
 
-    // ยืนยันรหัสผ่านก่อนเซฟ
-    final confirmed = await _showPasswordConfirmDialog();
-    if (confirmed != true) {
-      return;
-    }
-
-    // จัดรูปแบบข้อมูลสำหรับบันทึก
     var name = _nameController.text.trim();
     var detail = _detailController.text.trim();
 
@@ -290,66 +142,38 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
 
     try {
       final list = await _loadPillList();
-      final original = widget.medicine;
-      final oldId =
-          original['id']?.toString() ??
-          DateTime.now().millisecondsSinceEpoch.toString();
       final now = DateTime.now();
       final imageValue = _usingCustomImage
           ? _customImageBase64
           : _selectedImage;
 
-      final createdAt =
-          original['createdAt']?.toString() ?? now.toIso8601String();
-      final createBy = original['createby']?.toString() ?? widget.username;
-
-      final updated = {
-        'id': oldId,
+      final data = {
+        'id': now.millisecondsSinceEpoch.toString(),
         'name': name,
         'detail': detail,
         'image': imageValue,
         'beforeMeal': _beforeMeal,
         'afterMeal': _afterMeal,
-        'createby': createBy,
-        'createdAt': createdAt,
-        'updatedAt': now.toIso8601String(),
+        'createby': widget.username,
+        'createdAt': now.toIso8601String(),
       };
 
-      bool replaced = false;
-
-      // หา record ในไฟล์ด้วย id เดิม
-      for (int i = 0; i < list.length; i++) {
-        final item = list[i];
-        if (item is Map || item is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(item);
-          if ((map['id'] ?? '').toString() == oldId) {
-            list[i] = updated;
-            replaced = true;
-            break;
-          }
-        }
-      }
-
-      // ถ้ายังไม่เจอเลย ก็เพิ่มใหม่
-      if (!replaced) {
-        list.add(updated);
-      }
-
+      list.add(data);
       await _savePillList(list);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('บันทึกการแก้ไขตัวยาเรียบร้อย')),
+        const SnackBar(content: Text('บันทึกข้อมูลตัวยาเรียบร้อย')),
       );
 
       setState(() {
         _isSaving = false;
       });
 
-      Navigator.pop(context, updated);
+      Navigator.pop(context, data);
     } catch (e) {
-      debugPrint('editMedicine: save error: $e');
+      debugPrint('medicine_add: save error: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -549,7 +373,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('แก้ไขตัวยา')),
+      appBar: AppBar(title: const Text('เพิ่มตัวยา')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -683,7 +507,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
                             ),
                           )
                         : const Text(
-                            'บันทึกการแก้ไขตัวยา',
+                            'บันทึกข้อมูลตัวยา',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,

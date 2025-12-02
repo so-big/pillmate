@@ -1,4 +1,4 @@
-// lib/carlendar.dart
+// lib/view_carlendar.dart
 
 import 'dart:io';
 import 'dart:convert';
@@ -6,12 +6,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'carlendar_add.dart';
-import 'createProfile.dart';
-import 'manageProfile.dart';
-import 'leftmenu.dart';
-import 'medicine_add.dart';
-import 'medicine_manage.dart';
+import 'add_carlendar.dart';
+import 'create_profile.dart';
+import 'manage_profile.dart';
+import 'view_menu.dart';
+import 'add_medicine.dart';
+import 'manage_medicine.dart';
 import 'main.dart'; // สำหรับกลับไปหน้า LoginPage ตอน logout
 
 class CarlendarPage extends StatefulWidget {
@@ -319,13 +319,13 @@ class _CarlendarPageState extends State<CarlendarPage> {
             MaterialPageRoute(builder: (context) => const CreateProfilePage()),
           );
         },
-        onManageProfile: () {
+        onmanage_profile: () {
           Navigator.pop(context);
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) =>
-                  ManageProfilePage(username: widget.username),
+                  manage_profilePage(username: widget.username),
             ),
           );
         },

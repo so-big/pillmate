@@ -1,4 +1,4 @@
-// lib/manageProfile.dart
+// lib/manage_profile.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -6,20 +6,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'createProfile.dart';
-import 'editAccount.dart';
-import 'editProfile.dart';
+import 'create_profile.dart';
+import 'edit_account.dart';
+import 'edit_Profile.dart';
 
-class ManageProfilePage extends StatefulWidget {
+class manage_profilePage extends StatefulWidget {
   final String username;
 
-  const ManageProfilePage({super.key, required this.username});
+  const manage_profilePage({super.key, required this.username});
 
   @override
-  State<ManageProfilePage> createState() => _ManageProfilePageState();
+  State<manage_profilePage> createState() => _manage_profilePageState();
 }
 
-class _ManageProfilePageState extends State<ManageProfilePage> {
+class _manage_profilePageState extends State<manage_profilePage> {
   List<Map<String, dynamic>> _profiles = [];
   bool _isLoading = true;
 
@@ -97,7 +97,7 @@ class _ManageProfilePageState extends State<ManageProfilePage> {
         _profiles = filtered.toList();
       });
     } catch (e) {
-      debugPrint('Error loading profiles/account in manageProfile: $e');
+      debugPrint('Error loading profiles/account in manage_profile: $e');
       setState(() {
         _profiles = [];
         _accountUser = null;

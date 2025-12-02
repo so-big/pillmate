@@ -1,4 +1,4 @@
-// lib/leftmenu.dart
+// lib/view_menu.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -80,7 +80,7 @@ class LeftMenu extends StatefulWidget {
 
   final VoidCallback onManageCalendar; // จัดการปฏิทินแจ้งเตือน
   final VoidCallback onCreateProfile; // เพิ่มโปรไฟล์
-  final VoidCallback onManageProfile; // จัดการโปรไฟล์
+  final VoidCallback onmanage_profile; // จัดการโปรไฟล์
 
   final VoidCallback onAddMedicine; // เพิ่มยา
   final VoidCallback onManageMedicine; // จัดการยา
@@ -92,7 +92,7 @@ class LeftMenu extends StatefulWidget {
     required this.username,
     required this.onManageCalendar,
     required this.onCreateProfile,
-    required this.onManageProfile,
+    required this.onmanage_profile,
     required this.onAddMedicine,
     required this.onManageMedicine,
     required this.onLogout,
@@ -252,7 +252,7 @@ class _LeftMenuState extends State<LeftMenu> {
                   ),
                   onTap: () {
                     Navigator.pop(context);
-                    widget.onManageProfile();
+                    widget.onmanage_profile();
                   },
                 ),
 

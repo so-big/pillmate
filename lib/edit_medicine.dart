@@ -1,4 +1,4 @@
-// lib/medicine_add.dart
+// lib/edit_medicine.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -7,25 +7,29 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 
-class MedicineAddPage extends StatefulWidget {
+class EditMedicinePage extends StatefulWidget {
   final String username;
+  final Map<String, dynamic> medicine;
 
-  const MedicineAddPage({super.key, required this.username});
+  const EditMedicinePage({
+    super.key,
+    required this.username,
+    required this.medicine,
+  });
 
   @override
-  State<MedicineAddPage> createState() => _MedicineAddPageState();
+  State<EditMedicinePage> createState() => _EditMedicinePageState();
 }
 
-class _MedicineAddPageState extends State<MedicineAddPage> {
+class _EditMedicinePageState extends State<EditMedicinePage> {
   final _formKey = GlobalKey<FormState>();
 
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _detailController = TextEditingController();
+  late TextEditingController _nameController;
+  late TextEditingController _detailController;
 
   bool _beforeMeal = true;
   bool _afterMeal = false;
 
-  // รูป default จาก assets
   final List<String> _pillImages = const [
     'assets/pill/p_1.png',
     'assets/pill/p_2.png',
@@ -35,8 +39,6 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
   ];
 
   late String _selectedImage;
-
-  // base64 ของรูปจากเครื่อง
   String? _customImageBase64;
 
   bool _isSaving = false;
@@ -44,7 +46,30 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
   @override
   void initState() {
     super.initState();
-    _selectedImage = _pillImages.first;
+
+    final m = widget.medicine;
+
+    _nameController = TextEditingController(text: (m['name'] ?? '').toString());
+    _detailController = TextEditingController(
+      text: (m['detail'] ?? '').toString(),
+    );
+
+    _beforeMeal = (m['beforeMeal'] == true);
+    _afterMeal = (m['afterMeal'] == true);
+
+    final img = m['image'];
+    if (img is String && img.isNotEmpty) {
+      if (_pillImages.contains(img)) {
+        _selectedImage = img;
+        _customImageBase64 = null;
+      } else {
+        _selectedImage = _pillImages.first;
+        _customImageBase64 = img;
+      }
+    } else {
+      _selectedImage = _pillImages.first;
+      _customImageBase64 = null;
+    }
   }
 
   bool get _usingCustomImage => _customImageBase64 != null;
@@ -52,6 +77,11 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
   Future<File> get _pillProfileFile async {
     final dir = await getApplicationDocumentsDirectory();
     return File('${dir.path}/pillprofile.json');
+  }
+
+  Future<File> get _usersFile async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/user.json');
   }
 
   /// อ่าน / สร้าง list จากไฟล์ pillprofile.json
@@ -65,7 +95,7 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
           final decoded = jsonDecode(content);
           if (decoded is List) list = decoded;
         } catch (e) {
-          debugPrint('medicine_add: JSON decode error: $e');
+          debugPrint('editMedicine: JSON decode error: $e');
         }
       }
     }
@@ -92,7 +122,7 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
         _customImageBase64 = base64Str;
       });
     } catch (e) {
-      debugPrint('medicine_add: pick image error: $e');
+      debugPrint('editMedicine: pick image error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('เกิดข้อผิดพลาดในการเลือกรูปภาพ')),
@@ -100,7 +130,118 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
     }
   }
 
-  /// บันทึกข้อมูลตัวยาลง JSON
+  Future<bool> _verifyPassword(String inputPassword) async {
+    try {
+      final file = await _usersFile;
+      if (!await file.exists()) return false;
+
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) return false;
+
+      final decoded = jsonDecode(content);
+      if (decoded is! List) return false;
+
+      for (final u in decoded) {
+        if (u is Map || u is Map<String, dynamic>) {
+          final map = Map<String, dynamic>.from(u);
+          final userid = map['userid']?.toString();
+          final password = map['password']?.toString();
+          if (userid == widget.username && password == inputPassword) {
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('editMedicine: verifyPassword error: $e');
+    }
+    return false;
+  }
+
+  Future<bool?> _showPasswordConfirmDialog() async {
+    final controller = TextEditingController();
+    bool isChecking = false;
+    String? errorText;
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setStateDialog) {
+            Future<void> onConfirm() async {
+              final pwd = controller.text.trim();
+              if (pwd.isEmpty) {
+                setStateDialog(() {
+                  errorText = 'กรุณากรอกรหัสผ่าน';
+                });
+                return;
+              }
+
+              setStateDialog(() {
+                isChecking = true;
+                errorText = null;
+              });
+
+              final ok = await _verifyPassword(pwd);
+
+              setStateDialog(() {
+                isChecking = false;
+              });
+
+              if (ok) {
+                Navigator.of(ctx).pop(true);
+              } else {
+                setStateDialog(() {
+                  errorText = 'รหัสผ่านไม่ถูกต้อง';
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: const Text(
+                'ยืนยันรหัสผ่าน',
+                style: TextStyle(color: Colors.black),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: controller,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.black87),
+                    decoration: InputDecoration(
+                      labelText: 'รหัสผ่าน',
+                      labelStyle: const TextStyle(color: Colors.black87),
+                      errorText: errorText,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isChecking
+                      ? null
+                      : () => Navigator.of(ctx).pop(false),
+                  child: const Text('ยกเลิก'),
+                ),
+                TextButton(
+                  onPressed: isChecking ? null : onConfirm,
+                  child: isChecking
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('ยืนยัน'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _saveMedicine() async {
     if (_isSaving) return;
 
@@ -126,6 +267,13 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
       return;
     }
 
+    // ยืนยันรหัสผ่านก่อนเซฟ
+    final confirmed = await _showPasswordConfirmDialog();
+    if (confirmed != true) {
+      return;
+    }
+
+    // จัดรูปแบบข้อมูลสำหรับบันทึก
     var name = _nameController.text.trim();
     var detail = _detailController.text.trim();
 
@@ -142,38 +290,66 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
 
     try {
       final list = await _loadPillList();
+      final original = widget.medicine;
+      final oldId =
+          original['id']?.toString() ??
+          DateTime.now().millisecondsSinceEpoch.toString();
       final now = DateTime.now();
       final imageValue = _usingCustomImage
           ? _customImageBase64
           : _selectedImage;
 
-      final data = {
-        'id': now.millisecondsSinceEpoch.toString(),
+      final createdAt =
+          original['createdAt']?.toString() ?? now.toIso8601String();
+      final createBy = original['createby']?.toString() ?? widget.username;
+
+      final updated = {
+        'id': oldId,
         'name': name,
         'detail': detail,
         'image': imageValue,
         'beforeMeal': _beforeMeal,
         'afterMeal': _afterMeal,
-        'createby': widget.username,
-        'createdAt': now.toIso8601String(),
+        'createby': createBy,
+        'createdAt': createdAt,
+        'updatedAt': now.toIso8601String(),
       };
 
-      list.add(data);
+      bool replaced = false;
+
+      // หา record ในไฟล์ด้วย id เดิม
+      for (int i = 0; i < list.length; i++) {
+        final item = list[i];
+        if (item is Map || item is Map<String, dynamic>) {
+          final map = Map<String, dynamic>.from(item);
+          if ((map['id'] ?? '').toString() == oldId) {
+            list[i] = updated;
+            replaced = true;
+            break;
+          }
+        }
+      }
+
+      // ถ้ายังไม่เจอเลย ก็เพิ่มใหม่
+      if (!replaced) {
+        list.add(updated);
+      }
+
       await _savePillList(list);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('บันทึกข้อมูลตัวยาเรียบร้อย')),
+        const SnackBar(content: Text('บันทึกการแก้ไขตัวยาเรียบร้อย')),
       );
 
       setState(() {
         _isSaving = false;
       });
 
-      Navigator.pop(context, data);
+      Navigator.pop(context, updated);
     } catch (e) {
-      debugPrint('medicine_add: save error: $e');
+      debugPrint('editMedicine: save error: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -373,7 +549,7 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('เพิ่มตัวยา')),
+      appBar: AppBar(title: const Text('แก้ไขตัวยา')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -507,7 +683,7 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
                             ),
                           )
                         : const Text(
-                            'บันทึกข้อมูลตัวยา',
+                            'บันทึกการแก้ไขตัวยา',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,

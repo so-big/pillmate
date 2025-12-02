@@ -1,4 +1,4 @@
-// lib/dashboard.dart
+// lib/view_dashboard.dart
 
 import 'dart:io';
 import 'dart:convert';
@@ -7,14 +7,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'nortification_setup.dart';
-import 'carlendar.dart';
-import 'carlendar_add.dart';
-import 'carlendar_edit.dart'; // หน้าแก้ไข
-import 'createProfile.dart';
-import 'manageProfile.dart';
-import 'leftmenu.dart';
-import 'medicine_add.dart';
-import 'medicine_manage.dart';
+import 'view_carlendar.dart';
+import 'add_carlendar.dart';
+import 'edit_carlendar.dart'; // หน้าแก้ไข
+import 'create_profile.dart';
+import 'manage_profile.dart';
+import 'view_menu.dart';
+import 'add_medicine.dart';
+import 'manage_medicine.dart';
 import 'main.dart'; // มี LoginPage อยู่ในนี้
 
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
@@ -423,20 +423,20 @@ class _DashboardPageState extends State<DashboardPage> {
     final result = await showModalBottomSheet(
       context: context,
       isScrollControlled: true, // จำเป็นมาก เพื่อให้ขยายเกินครึ่งจอได้
-      useSafeArea: true,        // ช่วยให้ขยายเต็มพื้นที่ Safe Area ได้สวยงามขึ้น
+      useSafeArea: true, // ช่วยให้ขยายเต็มพื้นที่ Safe Area ได้สวยงามขึ้น
       enableDrag: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return DraggableScrollableSheet(
           initialChildSize: 0.5, // เริ่มต้นครึ่งจอ
-          minChildSize: 0.25,    // หดต่ำสุด
-          maxChildSize: 1.0,     // ขยายสูงสุด (เต็มจอ)
-          expand: true,         // ต้องเป็น false เพื่อให้ยืดหดตามการลาก
+          minChildSize: 0.25, // หดต่ำสุด
+          maxChildSize: 1.0, // ขยายสูงสุด (เต็มจอ)
+          expand: true, // ต้องเป็น false เพื่อให้ยืดหดตามการลาก
           builder: (ctx, scrollController) {
             // สำคัญ: ต้องส่ง scrollController นี้เข้าไปใน Widget ลูก
             return CarlendarAddSheet(
               username: widget.username,
-              scrollController: scrollController, 
+              scrollController: scrollController,
             );
           },
         );
@@ -1538,12 +1538,12 @@ class _DashboardPageState extends State<DashboardPage> {
             MaterialPageRoute(builder: (context) => const CreateProfilePage()),
           );
         },
-        onManageProfile: () {
+        onmanage_profile: () {
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) =>
-                  ManageProfilePage(username: widget.username),
+                  manage_profilePage(username: widget.username),
             ),
           );
         },

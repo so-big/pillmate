@@ -8,8 +8,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'forgotPassword.dart';
-import 'createAccount.dart';
-import 'dashboard.dart';
+import 'create_account.dart';
+import 'view_dashboard.dart';
 import 'database_helper.dart'; // <--- 1. เพิ่ม Import นี้เข้ามา
 
 void main() {
