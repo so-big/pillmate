@@ -52,8 +52,6 @@ class _EditAccountPageState extends State<EditAccountPage> {
     _loadAccount();
   }
 
-  // ลบฟังก์ชัน _usersFile() ทิ้ง เพราะไม่ใช้ไฟล์ JSON แล้ว
-
   // 3. แก้ไขการโหลดข้อมูลจาก SQLite
   Future<void> _loadAccount() async {
     try {
@@ -63,7 +61,8 @@ class _EditAccountPageState extends State<EditAccountPage> {
         setState(() {
           // ต้องสร้าง copy map เพื่อให้แน่ใจว่าแก้ไขได้ (Mutable)
           _accountUser = Map<String, dynamic>.from(user);
-          _selectedBase64Image = user['image']?.toString();
+          // ✅ แก้ไข: ใช้ key 'image_base64' ให้ตรงกับ DB
+          _selectedBase64Image = user['image_base64']?.toString();
           _selectedAvatarIndex = null;
         });
       } else {
@@ -360,7 +359,6 @@ class _EditAccountPageState extends State<EditAccountPage> {
 
     try {
       if (_accountUser == null) {
-        // กรณีโหลดไม่สำเร็จตั้งแต่แรก
         throw Exception('User data is null');
       }
 
@@ -374,8 +372,12 @@ class _EditAccountPageState extends State<EditAccountPage> {
         updatedUser['password'] = newPassword;
       }
 
-      // อัปเดตรูปภาพ
-      updatedUser['image'] = _selectedBase64Image ?? updatedUser['image'] ?? '';
+      // ✅ แก้ไข: อัปเดตรูปภาพโดยใช้ key 'image_base64'
+      updatedUser['image_base64'] =
+          _selectedBase64Image ?? updatedUser['image_base64'] ?? '';
+
+      // ลบ key 'image' เก่าออกถ้ามี (เพื่อความสะอาด)
+      updatedUser.remove('image');
 
       // เรียกใช้ updateUser ใน DatabaseHelper
       await dbHelper.updateUser(updatedUser);

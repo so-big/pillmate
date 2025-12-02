@@ -1,14 +1,16 @@
 // lib/manage_profile.dart
 
 import 'dart:convert';
-import 'dart:io';
+// import 'dart:io'; // ไม่ได้ใช้แล้ว เพราะเปลี่ยนไปใช้ DB
+// import 'package:path_provider/path_provider.dart'; // ไม่ได้ใช้แล้ว
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart'; // ต้อง import เพื่อใช้ object Database
 
 import 'create_profile.dart';
 import 'edit_account.dart';
 import 'edit_Profile.dart';
+import 'database_helper.dart'; // ✅ เรียกใช้ DatabaseHelper
 
 class manage_profilePage extends StatefulWidget {
   final String username;
@@ -23,17 +25,7 @@ class _manage_profilePageState extends State<manage_profilePage> {
   List<Map<String, dynamic>> _profiles = [];
   bool _isLoading = true;
 
-  Map<String, dynamic>? _accountUser; // ข้อมูล account จาก user.json
-
-  Future<File> get _profilesFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/profiles.json');
-  }
-
-  Future<File> get _usersFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/user.json');
-  }
+  Map<String, dynamic>? _accountUser; // ข้อมูล account (Master)
 
   @override
   void initState() {
@@ -41,63 +33,35 @@ class _manage_profilePageState extends State<manage_profilePage> {
     _loadData();
   }
 
+  // ✅ แก้ไข: โหลดข้อมูลจาก SQLite แทน JSON
   Future<void> _loadData() async {
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // โหลด user.json สำหรับ account
-      final usersFile = await _usersFile;
-      Map<String, dynamic>? account;
+      final dbHelper = DatabaseHelper();
+      final db = await dbHelper.database;
 
-      if (await usersFile.exists()) {
-        final content = await usersFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          final list = jsonDecode(content);
-          if (list is List) {
-            for (final u in list) {
-              if (u is Map || u is Map<String, dynamic>) {
-                final map = Map<String, dynamic>.from(u);
-                if (map['userid'] == widget.username) {
-                  account = map;
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
+      // 1. โหลดข้อมูล Master Account
+      // เทียบเท่ากับ: SELECT * FROM users WHERE userid = 'username'
+      final masterUser = await dbHelper.getUser(widget.username);
 
-      // โหลด profiles.json สำหรับโปรไฟล์ต่าง ๆ
-      final profilesFile = await _profilesFile;
-
-      List<dynamic> listProfiles = [];
-      if (await profilesFile.exists()) {
-        final content = await profilesFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          listProfiles = jsonDecode(content);
-        }
-      }
-
-      final filtered = listProfiles
-          .where((p) {
-            if (p is Map<String, dynamic>) {
-              return p['createby'] == widget.username;
-            }
-            if (p is Map) {
-              return p['createby'] == widget.username;
-            }
-            return false;
-          })
-          .map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p));
+      // 2. โหลดข้อมูล Sub-profiles
+      // เทียบเท่ากับ: SELECT * FROM users WHERE sub_profile = 'username'
+      final List<Map<String, dynamic>> subProfiles = await db.query(
+        'users',
+        where: 'sub_profile = ?',
+        whereArgs: [widget.username],
+      );
 
       setState(() {
-        _accountUser = account;
-        _profiles = filtered.toList();
+        _accountUser = masterUser;
+        // แปลงเป็น List<Map> เพื่อให้แน่ใจว่าแก้ไขได้และไม่ติดเรื่อง read-only
+        _profiles = List<Map<String, dynamic>>.from(subProfiles);
       });
     } catch (e) {
-      debugPrint('Error loading profiles/account in manage_profile: $e');
+      debugPrint('Error loading profiles from DB: $e');
       setState(() {
         _profiles = [];
         _accountUser = null;
@@ -109,63 +73,51 @@ class _manage_profilePageState extends State<manage_profilePage> {
     }
   }
 
+  // ✅ แก้ไข: เช็ครหัสผ่านจาก DB
   Future<bool> _validatePassword(String passwordInput) async {
     try {
-      final file = await _usersFile;
-      if (!await file.exists()) return false;
+      final dbHelper = DatabaseHelper();
+      final user = await dbHelper.getUser(widget.username);
 
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return false;
-
-      final list = jsonDecode(content);
-      if (list is! List) return false;
-
-      for (final u in list) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          if (map['userid'] == widget.username &&
-              map['password'] == passwordInput) {
-            return true;
-          }
+      if (user != null) {
+        // เช็คว่ารหัสผ่านตรงกันหรือไม่
+        if (user['password'] == passwordInput) {
+          return true;
         }
       }
       return false;
     } catch (e) {
-      debugPrint('Error validating password: $e');
+      debugPrint('Error validating password DB: $e');
       return false;
     }
   }
 
+  // ✅ แก้ไข: ลบข้อมูลจาก DB
   Future<void> _deleteProfile(int index) async {
     final toDelete = _profiles[index];
+    // ใน DB เราใช้ userid เป็นชื่อของ sub-profile
+    final userIdToDelete = toDelete['userid'];
 
     try {
-      final file = await _profilesFile;
+      final dbHelper = DatabaseHelper();
+      final db = await dbHelper.database;
 
-      List<dynamic> list = [];
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          list = jsonDecode(content);
-        }
-      }
-
-      list.removeWhere((p) {
-        if (p is Map || p is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(p);
-          return map['name'] == toDelete['name'] &&
-              map['createby'] == toDelete['createby'];
-        }
-        return false;
-      });
-
-      await file.writeAsString(jsonEncode(list));
+      // สั่งลบแถวที่มี userid ตรงกับโปรไฟล์ที่จะลบ
+      await db.delete(
+        'users',
+        where: 'userid = ?',
+        whereArgs: [userIdToDelete],
+      );
 
       setState(() {
         _profiles.removeAt(index);
       });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ลบโปรไฟล์ "$userIdToDelete" เรียบร้อย')),
+      );
     } catch (e) {
-      debugPrint('Error deleting profile: $e');
+      debugPrint('Error deleting profile DB: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -175,7 +127,8 @@ class _manage_profilePageState extends State<manage_profilePage> {
 
   Future<void> _confirmDelete(int index) async {
     final profile = _profiles[index];
-    final name = profile['name']?.toString() ?? 'ไม่ทราบชื่อ';
+    // เปลี่ยน key จาก 'name' เป็น 'userid' ตาม DB schema
+    final name = profile['userid']?.toString() ?? 'ไม่ทราบชื่อ';
     final TextEditingController pwdController = TextEditingController();
     String? errorText;
 
@@ -193,18 +146,21 @@ class _manage_profilePageState extends State<manage_profilePage> {
                 children: [
                   Text(
                     'คุณต้องการลบโปรไฟล์ "$name" ใช่หรือไม่?\n\n'
-                    'กรุณากรอกรหัสผ่านของคุณเพื่อยืนยัน',
-                    style: const TextStyle(fontSize: 14),
+                    'กรุณากรอกรหัสผ่านของคุณ (Master) เพื่อยืนยัน',
+                    // น้องใบเตยเพิ่ม color: Colors.black เข้าไปที่นี่ค่ะ
+                    style: const TextStyle(fontSize: 14, color: Colors.black),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: pwdController,
                     obscureText: true,
+                    // ตรงนี้เป็นสีดำอยู่แล้ว
                     style: const TextStyle(color: Colors.black),
                     decoration: InputDecoration(
                       border: const OutlineInputBorder(),
                       labelText: 'รหัสผ่าน',
-                      labelStyle: const TextStyle(color: Colors.black87),
+                      // ปรับจาก Colors.black87 เป็น Colors.black ให้ดำสนิทตามที่นายท่านต้องการค่ะ
+                      labelStyle: const TextStyle(color: Colors.black),
                       errorText: errorText,
                     ),
                   ),
@@ -340,8 +296,9 @@ class _manage_profilePageState extends State<manage_profilePage> {
   }
 
   Widget _buildAccountCard() {
+    // เปลี่ยน key ให้ตรงกับ DB: userid, image_base64
     final accName = _accountUser?['userid']?.toString() ?? widget.username;
-    final accImage = _accountUser?['image'];
+    final accImage = _accountUser?['image_base64'];
 
     return InkWell(
       onTap: _goToEditAccount,
@@ -383,7 +340,7 @@ class _manage_profilePageState extends State<manage_profilePage> {
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'บัญชีผู้ใช้ (แก้ไขรูปภาพ / รหัสผ่านได้)',
+                      'บัญชีผู้ใช้หลัก (Master Account)',
                       style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ],
@@ -444,7 +401,10 @@ class _manage_profilePageState extends State<manage_profilePage> {
 
                   final profileIndex = index - 1;
                   final profile = _profiles[profileIndex];
-                  final name = profile['name']?.toString() ?? 'ไม่ทราบชื่อ';
+                  // ใช้ key 'userid' แทน 'name' ตาม DB
+                  final name = profile['userid']?.toString() ?? 'ไม่ทราบชื่อ';
+                  // ใช้ key 'sub_profile' แทน 'createby' ตาม DB
+                  final createBy = profile['sub_profile']?.toString() ?? '-';
 
                   return InkWell(
                     onTap: () => _goToEditProfile(profileIndex),
@@ -469,7 +429,10 @@ class _manage_profilePageState extends State<manage_profilePage> {
                                 color: Colors.grey.shade200,
                               ),
                               clipBehavior: Clip.antiAlias,
-                              child: _buildProfileImage(profile['image']),
+                              // ใช้ key 'image_base64' แทน 'image' ตาม DB
+                              child: _buildProfileImage(
+                                profile['image_base64'],
+                              ),
                             ),
                             const SizedBox(width: 12),
 
@@ -488,7 +451,7 @@ class _manage_profilePageState extends State<manage_profilePage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'สร้างโดย: ${profile['createby'] ?? '-'}',
+                                    'สร้างโดย: $createBy',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: Colors.black54,

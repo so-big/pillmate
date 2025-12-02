@@ -1,7 +1,9 @@
 // lib/view_menu.dart
 
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 // ใช้ยิง noti ทดสอบ
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -107,11 +109,13 @@ class LeftMenu extends StatefulWidget {
 
 class _LeftMenuState extends State<LeftMenu> {
   String? _imageBase64;
+  bool _isNfcEnabled = false; // ค่าเริ่มต้นเป็น false (ปิด)
 
   @override
   void initState() {
     super.initState();
     _loadUserImage();
+    _loadNfcStatus();
   }
 
   // แก้ไข: ดึงรูปภาพจาก Database (คอลัมน์ image_base64)
@@ -121,7 +125,6 @@ class _LeftMenuState extends State<LeftMenu> {
       final userMap = await dbHelper.getUser(widget.username);
 
       if (userMap != null) {
-        // ✅ แก้ไข: ใช้ชื่อคอลัมน์ 'image_base64' ให้ถูกต้อง
         final img = userMap['image_base64'];
 
         if (img != null && img.toString().isNotEmpty) {
@@ -132,8 +135,111 @@ class _LeftMenuState extends State<LeftMenu> {
       }
     } catch (e) {
       debugPrint('LeftMenu: error loading user image from DB: $e');
-      // ถ้า error ก็ปล่อยไป ใช้ default avatar แทน
     }
+  }
+
+  // ✅ ฟังก์ชันหาไฟล์ appstatus.json
+  Future<File> get _appStatusFile async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/appstatus.json');
+  }
+
+  // ✅ ฟังก์ชันโหลดสถานะ NFC
+  Future<void> _loadNfcStatus() async {
+    try {
+      final file = await _appStatusFile;
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          final data = jsonDecode(content);
+          if (data is Map) {
+            setState(() {
+              _isNfcEnabled = data['nfc_enabled'] ?? false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('LeftMenu: error loading NFC status: $e');
+    }
+  }
+
+  // ✅ ฟังก์ชันบันทึกสถานะ NFC ลง JSON
+  Future<void> _toggleNfc(bool value) async {
+    // อัปเดต UI ก่อน
+    setState(() {
+      _isNfcEnabled = value;
+    });
+
+    try {
+      final file = await _appStatusFile;
+      // อ่านข้อมูลเดิมก่อน (ถ้ามี)
+      Map<String, dynamic> data = {};
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          try {
+            data = jsonDecode(content) as Map<String, dynamic>;
+          } catch (_) {}
+        }
+      }
+
+      // อัปเดตค่า NFC
+      data['nfc_enabled'] = value;
+      data['updated_at'] = DateTime.now().toIso8601String();
+
+      await file.writeAsString(jsonEncode(data));
+      debugPrint('Saved NFC status: $value to appstatus.json');
+    } catch (e) {
+      debugPrint('LeftMenu: error saving NFC status: $e');
+    }
+  }
+
+  // ✅ ฟังก์ชันแสดง Dialog แจ้งเตือนตามสถานะ NFC
+  Future<void> _showNfcInfoDialog(bool isEnabled) async {
+    String message;
+    if (isEnabled) {
+      message =
+          'ฟังก์ชั่น NFC บนแอพถูกเปิดแล้ว แต่ผู้ใช้งานจะต้องเปิดฟังก์ชั่น NFC บนโทรศัพท์ด้วย';
+    } else {
+      message = 'ฟังก์ชั่น NFC ถูกปิดแล้วโหมดใช้งานสำหรับอุปกรณ์ที่ไม่มี NFC';
+    }
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text(
+            'การตั้งค่า NFC',
+            style: TextStyle(
+              color: Colors.black,
+              fontWeight: FontWeight.bold,
+            ), // หัวข้อสีดำ
+          ),
+          content: Text(
+            message,
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 16,
+            ), // ✅ เนื้อหาตัวหนังสือสีดำ
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+              },
+              child: const Text(
+                'ตกลง',
+                style: TextStyle(
+                  color: Colors.teal,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Widget _buildAvatar() {
@@ -179,7 +285,7 @@ class _LeftMenuState extends State<LeftMenu> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                // เมนูใหม่ 1: จัดการกำหนดการรายวัน (ไปหน้า Dashboard)
+                // เมนู 1: จัดการกำหนดการรายวัน (ไปหน้า Dashboard)
                 ListTile(
                   leading: const Icon(Icons.dashboard),
                   title: const Text(
@@ -191,8 +297,6 @@ class _LeftMenuState extends State<LeftMenu> {
                     widget.onShowDashboard();
                   },
                 ),
-
-                // ลบ Divider ออกเพื่อให้เป็นกลุ่มเดียวกับปฏิทิน
 
                 // เมนู 2: จัดการปฏิทินแจ้งเตือน (ไปหน้า Calendar)
                 ListTile(
@@ -207,7 +311,8 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                const Divider(height: 1), // จบหมวดการจัดการเวลา
+                const Divider(height: 1),
+
                 // เมนู 3: เพิ่มยา
                 ListTile(
                   leading: const Icon(Icons.medication),
@@ -234,7 +339,8 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                const Divider(height: 1), // จบหมวดยา
+                const Divider(height: 1),
+
                 // เมนู 5: เพิ่มโปรไฟล์
                 ListTile(
                   leading: const Icon(Icons.person_add),
@@ -261,7 +367,8 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                const Divider(height: 1), // จบหมวดโปรไฟล์
+                const Divider(height: 1),
+
                 // เมนู: ตั้งค่าการแจ้งเตือน
                 ListTile(
                   leading: const Icon(Icons.notifications_active),
@@ -284,6 +391,26 @@ class _LeftMenuState extends State<LeftMenu> {
                       ),
                     );
                   },
+                ),
+
+                const Divider(height: 1), // ✅ ขีดแบ่ง Section ก่อน NFC
+                // ✅ เมนูใหม่: สวิตช์เปิด/ปิด NFC
+                SwitchListTile(
+                  secondary: const Icon(Icons.nfc),
+                  title: const Text(
+                    'ใช้ NFC',
+                    style: TextStyle(color: Colors.black),
+                  ),
+                  value: _isNfcEnabled,
+                  onChanged: (bool value) async {
+                    // 1. บันทึกค่า
+                    await _toggleNfc(value);
+                    // 2. แสดง Dialog แจ้งเตือน
+                    if (context.mounted) {
+                      await _showNfcInfoDialog(value);
+                    }
+                  },
+                  activeColor: Colors.teal,
                 ),
               ],
             ),

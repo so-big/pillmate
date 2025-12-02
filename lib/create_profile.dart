@@ -10,6 +10,9 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
+// Import DatabaseHelper
+import 'database_helper.dart';
+
 class CreateProfilePage extends StatefulWidget {
   const CreateProfilePage({super.key});
 
@@ -19,10 +22,13 @@ class CreateProfilePage extends StatefulWidget {
 
 class _CreateProfilePageState extends State<CreateProfilePage> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _infoController =
+      TextEditingController(); // ✅ เพิ่ม Controller สำหรับ Info
+
   bool _isSaving = false;
   String? _errorMessage;
 
-  String? _currentUsername;
+  String? _currentUsername; // Master User (ผู้สร้าง)
 
   // รูปโปรไฟล์เบื้องต้นจาก assets
   final List<String> _avatarAssets = const [
@@ -35,7 +41,7 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
   ];
 
   int? _selectedAvatarIndex;
-  String? _selectedBase64Image; // base64 ที่จะเขียนลง JSON
+  String? _selectedBase64Image; // base64 ที่จะเขียนลง DB
 
   final ImagePicker _picker = ImagePicker();
 
@@ -49,6 +55,7 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
     return getApplicationDocumentsDirectory();
   }
 
+  // ยังคงอ่านจาก user-stat.json เพื่อดูว่าใคร Login อยู่ (Master User)
   Future<void> _loadCurrentUser() async {
     try {
       final dir = await _appDir();
@@ -75,11 +82,6 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
         _currentUsername ??= 'unknown';
       });
     }
-  }
-
-  Future<File> _profilesFile() async {
-    final dir = await _appDir();
-    return File('${dir.path}/profiles.json');
   }
 
   // แปลง asset image -> base64
@@ -190,8 +192,10 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
     }
   }
 
+  // ✅ ฟังก์ชันบันทึกข้อมูลลง SQLite
   Future<void> _saveProfile() async {
     final name = _nameController.text.trim();
+    final info = _infoController.text.trim(); // ✅ รับค่า info
 
     if (name.isEmpty) {
       setState(() {
@@ -200,9 +204,9 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
       return;
     }
 
-    if (_currentUsername == null) {
+    if (_currentUsername == null || _currentUsername == 'unknown') {
       setState(() {
-        _errorMessage = 'ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน (username)';
+        _errorMessage = 'ไม่พบข้อมูลผู้ใช้หลัก (Master User)';
       });
       return;
     }
@@ -213,33 +217,41 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
     });
 
     try {
-      final file = await _profilesFile();
+      final dbHelper = DatabaseHelper();
 
-      List<dynamic> list = [];
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          list = jsonDecode(content);
-        }
-      }
-
-      final newProfile = {
-        'name': name,
-        'createby': _currentUsername,
-        'image': _selectedBase64Image ?? '', // ถ้าไม่เลือก ก็เก็บเป็น '' พอ
+      // เตรียมข้อมูลลง DB
+      Map<String, dynamic> row = {
+        'userid': name, // ใช้ชื่อโปรไฟล์เป็น userid ของ sub-profile
+        'password': '-', // ใส่ - ตามที่กำหนด
+        'image_base64': _selectedBase64Image ?? '',
+        'sub_profile':
+            _currentUsername, // ✅ ระบุว่าใครเป็นเจ้าของ (Master User)
+        'info': info, // ✅ บันทึกข้อมูลเพิ่มเติมลงคอลัมน์ info
+        'created_at': DateTime.now().toIso8601String(),
       };
 
-      list.add(newProfile);
-
-      await file.writeAsString(jsonEncode(list));
+      // บันทึกลงตาราง users
+      await dbHelper.insertUser(row);
 
       if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('บันทึกโปรไฟล์เรียบร้อย')));
+
       Navigator.pop(context); // กลับไปหน้าก่อน
     } catch (e) {
-      debugPrint('Error saving profile: $e');
+      debugPrint('Error saving profile to DB: $e');
+
+      // กรณี Error ส่วนใหญ่จะเป็นเรื่องชื่อซ้ำ (Unique Constraint)
+      String msg = 'บันทึกไม่สำเร็จ: $e';
+      if (e.toString().contains('UNIQUE constraint failed')) {
+        msg = 'ชื่อโปรไฟล์ "$name" มีอยู่แล้ว กรุณาใช้ชื่ออื่น';
+      }
+
       if (!mounted) return;
       setState(() {
-        _errorMessage = 'บันทึกโปรไฟล์ไม่สำเร็จ: $e';
+        _errorMessage = msg;
       });
     } finally {
       if (mounted) {
@@ -358,6 +370,7 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
   @override
   void dispose() {
     _nameController.dispose();
+    _infoController.dispose(); // ✅ อย่าลืม dispose controller ตัวใหม่
     super.dispose();
   }
 
@@ -375,7 +388,7 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
             children: [
               // ผู้ใช้ปัจจุบัน
               Text(
-                'ผู้ใช้ปัจจุบัน: $usernameText',
+                'ผู้ใช้ปัจจุบัน (Master): $usernameText',
                 style: const TextStyle(fontSize: 14, color: Colors.black87),
               ),
               const SizedBox(height: 16),
@@ -406,6 +419,32 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
               ),
 
               const SizedBox(height: 16),
+
+              // ✅ เพิ่มช่องกรอกข้อมูลเพิ่มเติม (info)
+              const Text(
+                'ข้อมูลเพิ่มเติม (ไม่จำเป็นต้องใส่)',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              TextField(
+                controller: _infoController,
+                maxLines: 4, // กำหนดให้สูง 4 บรรทัด
+                style: const TextStyle(color: Colors.black),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  hintText:
+                      'เช่น โรคประจำตัว, ยาที่แพ้, เบอร์ติดต่อฉุกเฉิน ฯลฯ',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  alignLabelWithHint: true,
+                ),
+              ),
+
+              const SizedBox(height: 24),
 
               if (_errorMessage != null)
                 Padding(

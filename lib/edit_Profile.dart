@@ -1,16 +1,19 @@
 // lib/edit_Profile.dart
 
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart'
+    show rootBundle; // จำเป็นสำหรับการโหลด asset มาแปลง
 import 'package:image_picker/image_picker.dart';
 
+// นำเข้า DatabaseHelper
+import 'database_helper.dart';
+
 class EditProfilePage extends StatefulWidget {
-  final String username;
-  final Map<String, dynamic> profile;
+  final String username; // Master username
+  final Map<String, dynamic> profile; // ข้อมูลโปรไฟล์ที่จะแก้
 
   const EditProfilePage({
     super.key,
@@ -29,9 +32,25 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late TextEditingController _noteController;
 
   String? _customImageBase64;
-  String? _assetImagePath;
+
+  // เก็บชื่อเดิมไว้ เพื่อใช้เป็น WHERE clause เวลาอัปเดต
+  late String _originalProfileName;
 
   bool _isSaving = false;
+
+  // เรียกใช้ Database Helper
+  final dbHelper = DatabaseHelper();
+
+  // ✅ 1. เพิ่มรายการรูปภาพต้นฉบับ (เหมือนหน้า Create Profile)
+  final List<String> _avatarAssets = const [
+    'assets/simpleProfile/profile_1.png',
+    'assets/simpleProfile/profile_2.png',
+    'assets/simpleProfile/profile_3.png',
+    'assets/simpleProfile/profile_4.png',
+    'assets/simpleProfile/profile_5.png',
+    'assets/simpleProfile/profile_6.png',
+  ];
+  int? _selectedAvatarIndex; // เก็บสถานะว่าเลือกรูปไหนอยู่ (ถ้าเลือกจาก asset)
 
   @override
   void initState() {
@@ -39,31 +58,44 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     final p = widget.profile;
 
-    _nameController = TextEditingController(text: (p['name'] ?? '').toString());
-    _noteController = TextEditingController(text: (p['note'] ?? '').toString());
+    _originalProfileName = (p['userid'] ?? '').toString();
+    _nameController = TextEditingController(text: _originalProfileName);
+    _noteController = TextEditingController(text: (p['info'] ?? '').toString());
 
-    final img = p['image'];
+    final img = p['image_base64'];
     if (img is String && img.isNotEmpty) {
-      if (img.startsWith('assets/')) {
-        _assetImagePath = img;
-        _customImageBase64 = null;
-      } else {
-        _assetImagePath = null;
-        _customImageBase64 = img;
-      }
+      _customImageBase64 = img;
     }
   }
 
-  bool get _usingCustomImage => _customImageBase64 != null;
+  bool get _usingCustomImage =>
+      _customImageBase64 != null && _customImageBase64!.isNotEmpty;
 
-  Future<File> get _profilesFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/profiles.json');
+  // ✅ 2. เพิ่มฟังก์ชันแปลง Asset เป็น Base64
+  Future<String> _loadAssetAsBase64(String assetPath) async {
+    final byteData = await rootBundle.load(assetPath);
+    final buffer = byteData.buffer;
+    final Uint8List uint8list = buffer.asUint8List(
+      byteData.offsetInBytes,
+      byteData.lengthInBytes,
+    );
+    return base64Encode(uint8list);
   }
 
-  Future<File> get _usersFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/user.json');
+  // ✅ 3. เพิ่มฟังก์ชันเมื่อเลือกรูปจากรายการ Assets
+  Future<void> _selectAvatarFromAssets(int index) async {
+    try {
+      final base64 = await _loadAssetAsBase64(_avatarAssets[index]);
+      setState(() {
+        _selectedAvatarIndex = index;
+        _customImageBase64 = base64; // อัปเดตรูปที่จะบันทึกทันที
+      });
+    } catch (e) {
+      debugPrint('editProfile: load asset error: $e');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('โหลดรูปโปรไฟล์ไม่สำเร็จ')));
+    }
   }
 
   Future<void> _pickCustomImage() async {
@@ -78,7 +110,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       setState(() {
         _customImageBase64 = base64Str;
-        _assetImagePath = null;
+        _selectedAvatarIndex =
+            null; // ถ้าเลือกจาก gallery ให้ยกเลิกการเลือก asset
       });
     } catch (e) {
       debugPrint('editProfile: pick image error: $e');
@@ -111,19 +144,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
           child: Icon(Icons.person, size: 32),
         );
       }
-    } else if (_assetImagePath != null) {
-      return CircleAvatar(
-        radius: 40,
-        backgroundColor: Colors.white,
-        child: ClipOval(
-          child: Image.asset(
-            _assetImagePath!,
-            width: 80,
-            height: 80,
-            fit: BoxFit.cover,
-          ),
-        ),
-      );
     } else {
       return const CircleAvatar(
         radius: 40,
@@ -134,23 +154,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   Future<bool> _verifyPassword(String inputPassword) async {
     try {
-      final file = await _usersFile;
-      if (!await file.exists()) return false;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return false;
-
-      final decoded = jsonDecode(content);
-      if (decoded is! List) return false;
-
-      for (final u in decoded) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          final userid = map['userid']?.toString();
-          final password = map['password']?.toString();
-          if (userid == widget.username && password == inputPassword) {
-            return true;
-          }
+      final user = await dbHelper.getUser(widget.username);
+      if (user != null) {
+        if (user['password'] == inputPassword) {
+          return true;
         }
       }
     } catch (e) {
@@ -200,11 +207,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
             }
 
             return AlertDialog(
-              // แก้ให้เหลือคำนี้คำเดียวตามคำสั่ง
               title: const Text('กรุณายืนยันรหัสผ่าน'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  const Text(
+                    'ใส่รหัสผ่านบัญชีหลักเพื่อยืนยันการแก้ไข',
+                    style: const TextStyle(fontSize: 14, color: Colors.black),
+                  ),
+
+                  const SizedBox(height: 10),
                   TextField(
                     controller: controller,
                     obscureText: true,
@@ -213,6 +225,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       labelText: 'รหัสผ่าน',
                       labelStyle: const TextStyle(color: Colors.black87),
                       errorText: errorText,
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                 ],
@@ -249,7 +262,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
       return;
     }
 
-    // ยืนยันรหัสผ่านก่อนบันทึก
     final confirmed = await _showPasswordConfirmDialog();
     if (confirmed != true) {
       return;
@@ -260,58 +272,23 @@ class _EditProfilePageState extends State<EditProfilePage> {
     });
 
     try {
-      final file = await _profilesFile;
+      final db = await dbHelper.database;
 
-      List<dynamic> list = [];
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          try {
-            final decoded = jsonDecode(content);
-            if (decoded is List) {
-              list = decoded;
-            }
-          } catch (e) {
-            debugPrint('editProfile: JSON decode error: $e');
-          }
-        }
-      }
+      final newName = _nameController.text.trim();
+      final newInfo = _noteController.text.trim();
 
-      final original = widget.profile;
-      final id =
-          original['id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
-
-      final now = DateTime.now();
-
-      final updated = {
-        'id': id,
-        'name': _nameController.text.trim(),
-        'note': _noteController.text.trim(),
-        'image': _usingCustomImage
-            ? _customImageBase64
-            : (_assetImagePath ?? original['image']),
-        'createby': original['createby'] ?? widget.username,
-        'createdAt': original['createdAt'] ?? now.toIso8601String(),
-        'updatedAt': now.toIso8601String(),
+      final Map<String, dynamic> updatedValues = {
+        'userid': newName,
+        'info': newInfo,
+        'image_base64': _customImageBase64 ?? '',
       };
 
-      bool replaced = false;
-      for (int i = 0; i < list.length; i++) {
-        final item = list[i];
-        try {
-          if (item is Map && item['id'] == id) {
-            list[i] = updated;
-            replaced = true;
-            break;
-          }
-        } catch (_) {}
-      }
-
-      if (!replaced) {
-        list.add(updated);
-      }
-
-      await file.writeAsString(jsonEncode(list), flush: true);
+      await db.update(
+        'users',
+        updatedValues,
+        where: 'userid = ?',
+        whereArgs: [_originalProfileName],
+      );
 
       if (!mounted) return;
 
@@ -319,15 +296,17 @@ class _EditProfilePageState extends State<EditProfilePage> {
         const SnackBar(content: Text('บันทึกการแก้ไขโปรไฟล์เรียบร้อย')),
       );
 
-      Navigator.pop(context, updated);
+      Navigator.pop(context, true);
     } catch (e) {
       debugPrint('editProfile: error saving profile: $e');
+
+      String msg = 'ไม่สามารถบันทึกข้อมูลได้';
+      if (e.toString().contains('UNIQUE constraint failed')) {
+        msg = 'ชื่อโปรไฟล์นี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น';
+      }
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง'),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } finally {
       if (mounted) {
         setState(() {
@@ -385,6 +364,51 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
 
+                // ✅ 4. เพิ่มส่วนเลือกรูปจาก Assets
+                const SizedBox(height: 16),
+                const Text(
+                  'เลือกรูปภาพมาตรฐาน',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 72,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _avatarAssets.length,
+                    itemBuilder: (context, index) {
+                      final isSelected = _selectedAvatarIndex == index;
+                      return GestureDetector(
+                        onTap: () => _selectAvatarFromAssets(index),
+                        child: Container(
+                          margin: EdgeInsets.only(
+                            right: index == _avatarAssets.length - 1 ? 0 : 8,
+                          ),
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected
+                                  ? Colors.blue
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                          child: ClipOval(
+                            child: Image.asset(
+                              _avatarAssets[index],
+                              width: 56,
+                              height: 56,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                // ------------------------------------
                 const SizedBox(height: 24),
 
                 const Text(

@@ -10,7 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'forgotPassword.dart';
 import 'create_account.dart';
 import 'view_dashboard.dart';
-import 'database_helper.dart'; // <--- 1. เพิ่ม Import นี้เข้ามา
+import 'database_helper.dart';
 
 void main() {
   runApp(const MyApp());
@@ -79,6 +79,9 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   String _message = '';
 
+  // เพิ่มตัวแปรเช็คความยาวรหัสผ่าน
+  bool _isPasswordValid = false;
+
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
@@ -89,8 +92,6 @@ class _LoginPageState extends State<LoginPage> {
     return getApplicationDocumentsDirectory();
   }
 
-  // (ลบ _userFile() ออก เพราะไม่ใช้ user.json แล้ว)
-
   // ยังใช้ไฟล์นี้สำหรับเก็บสถานะ Remember Me เหมือนเดิม (แยกจาก Database หลัก)
   Future<File> _userStatFile() async {
     final dir = await _appDir();
@@ -100,7 +101,18 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    // ✅ เพิ่ม Listener คอยฟังการพิมพ์รหัสผ่าน
+    _passwordController.addListener(_validatePasswordLength);
     _loadRememberMeAndMaybeAutoLogin();
+  }
+
+  // ✅ ฟังก์ชันตรวจสอบความยาวรหัสผ่าน
+  void _validatePasswordLength() {
+    setState(() {
+      // ต้องมากกว่า 7 ตัวอักษร (8 ตัวขึ้นไป) ถึงจะให้กดได้
+      // วิธีนี้จะกัน Child Profile ที่มีรหัสแค่ '-' (1 ตัวอักษร) ได้แน่นอน
+      _isPasswordValid = _passwordController.text.length > 7;
+    });
   }
 
   Future<void> _loadRememberMeAndMaybeAutoLogin() async {
@@ -120,6 +132,9 @@ class _LoginPageState extends State<LoginPage> {
               _usernameController.text = username;
               _passwordController.text = password;
             });
+
+            // ตรวจสอบความยาวรหัสผ่านหลังจากโหลด Auto Fill ด้วย
+            _validatePasswordLength();
 
             // ถ้ามี rememberMe จริง และ username/password ไม่ว่าง → auto login
             if (remember && username.isNotEmpty && password.isNotEmpty) {
@@ -153,7 +168,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   // --------------------------------------------------------------------------
-  // ✅ แก้ไขส่วนนี้: เปลี่ยนจากอ่านไฟล์ JSON เป็นเรียกผ่าน DatabaseHelper (SQLite)
+  // ดึงข้อมูล User จาก SQLite
   // --------------------------------------------------------------------------
   Future<Map<String, dynamic>?> _findUser(
     String username,
@@ -186,6 +201,14 @@ class _LoginPageState extends State<LoginPage> {
     final password = _passwordController.text;
 
     if (!auto) {
+      // ✅ เพิ่ม Logic กันเหนียว: ถ้ารหัสสั้นกว่า 8 ตัว ให้ return เลย (ถึงแม้ปุ่มจะกดไม่ได้ก็ตาม)
+      if (password.length <= 7) {
+        setState(() {
+          _message = 'รหัสผ่านต้องมีความยาวมากกว่าหรือเท่ากับ 8 ตัวอักษร';
+        });
+        return;
+      }
+
       if (username.isEmpty || password.isEmpty) {
         setState(() {
           _message = 'กรุณากรอก Username และ Password';
@@ -213,7 +236,7 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // ล็อกอินสำเร็จ → บันทึก rememberMe (บันทึกลงไฟล์ local เหมือนเดิมเพื่อความสะดวกในการเปิดแอปรอบหน้า)
+    // ล็อกอินสำเร็จ → บันทึก rememberMe
     await _saveUserStat(
       username: username,
       password: password,
@@ -225,7 +248,7 @@ class _LoginPageState extends State<LoginPage> {
       _message = '';
     });
 
-    // ไปหน้า Dashboard (แทนที่หน้า Login)
+    // ไปหน้า Dashboard
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -236,6 +259,8 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
+    // ✅ อย่าลืม remove listener
+    _passwordController.removeListener(_validatePasswordLength);
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -356,30 +381,43 @@ class _LoginPageState extends State<LoginPage> {
 
                 const SizedBox(height: 10),
 
-                // Login Button
+                // ✅ Login Button (แก้ไขให้เช็ค _isPasswordValid)
                 Container(
                   width: double.infinity,
                   height: 50,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF90EE90), Color(0xFF32CD32)],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        spreadRadius: 2,
-                        blurRadius: 5,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
+                    // ถ้า Password ยังไม่ครบ 9 ตัว ให้เป็นสีเทา ถ้าครบแล้วให้เป็นสีเขียว
+                    gradient: _isPasswordValid
+                        ? const LinearGradient(
+                            colors: [Color(0xFF90EE90), Color(0xFF32CD32)],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          )
+                        : const LinearGradient(
+                            colors: [
+                              Colors.grey,
+                              Colors.grey,
+                            ], // สีปุ่ม Disable
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
+                    boxShadow: _isPasswordValid
+                        ? [
+                            const BoxShadow(
+                              color: Colors.black26,
+                              spreadRadius: 2,
+                              blurRadius: 5,
+                              offset: Offset(0, 3),
+                            ),
+                          ]
+                        : [], // ไม่มีเงาถ้าปุ่มกดไม่ได้
                   ),
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
-                      onTap: _isLoading
+                      // ถ้ากำลังโหลด หรือ รหัสผ่านไม่ถูกต้อง (สั้นเกินไป) ให้กดไม่ได้ (null)
+                      onTap: (_isLoading || !_isPasswordValid)
                           ? null
                           : () => _handleLogin(auto: false),
                       borderRadius: BorderRadius.circular(10),
@@ -395,10 +433,13 @@ class _LoginPageState extends State<LoginPage> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Text(
+                            : Text(
                                 'LOG IN',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  // ถ้าปุ่ม Disable ให้ตัวหนังสือจางลงหน่อย
+                                  color: _isPasswordValid
+                                      ? Colors.white
+                                      : Colors.white70,
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: 1.5,
@@ -408,6 +449,17 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
+
+                // คำอธิบายเล็กๆ ใต้ปุ่ม (Optional: เพื่อบอก user ว่าทำไมกดไม่ได้)
+                if (!_isPasswordValid && _passwordController.text.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      '* รหัสผ่านต้องมากกว่า 8 ตัวอักษร',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                  ),
+
                 const SizedBox(height: 25),
 
                 // Forgot Password and Create Account
