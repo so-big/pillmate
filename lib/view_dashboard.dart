@@ -1524,6 +1524,14 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(title: const Text('การแจ้งเตือน')),
       drawer: LeftMenu(
         username: widget.username,
+        // --- ส่วนที่ต้องกำหนด ---
+
+        // 1. ไปหน้า Dashboard: (เราอยู่หน้านี้อยู่แล้ว) -> ปล่อยว่างเลย
+        onShowDashboard: () {
+          // ไม่ต้องทำอะไร (LeftMenu ปิด drawer ให้เอง)
+        },
+
+        // 2. ไปหน้าปฏิทิน: สั่ง Push ไป
         onManageCalendar: () {
           Navigator.push(
             context,
@@ -1532,6 +1540,8 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           );
         },
+
+        // -----------------------
         onCreateProfile: () {
           Navigator.push(
             context,

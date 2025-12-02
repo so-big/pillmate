@@ -31,7 +31,7 @@ class DatabaseHelper {
     }
 
     Directory documentsDirectory = await getApplicationDocumentsDirectory();
-    String path = join(documentsDirectory.path, "user.db");
+    String path = join(documentsDirectory.path, "user");
 
     // ตรวจสอบว่ามีไฟล์ DB หรือยัง ถ้าไม่มีให้ copy จาก assets
     if (FileSystemEntity.typeSync(path) == FileSystemEntityType.notFound) {

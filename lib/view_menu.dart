@@ -1,13 +1,13 @@
 // lib/view_menu.dart
 
 import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 // ใช้ยิง noti ทดสอบ
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+// Database Helper
+import 'database_helper.dart';
 
 // หน้า setting การแจ้งเตือน
 import 'nortification_setting.dart';
@@ -78,7 +78,9 @@ Future<void> _showTestAlarm() async {
 class LeftMenu extends StatefulWidget {
   final String username;
 
-  final VoidCallback onManageCalendar; // จัดการปฏิทินแจ้งเตือน
+  final VoidCallback
+  onShowDashboard; // เมนูใหม่: จัดการกำหนดการรายวัน (Dashboard)
+  final VoidCallback onManageCalendar; // จัดการปฏิทินแจ้งเตือน (Calendar)
   final VoidCallback onCreateProfile; // เพิ่มโปรไฟล์
   final VoidCallback onmanage_profile; // จัดการโปรไฟล์
 
@@ -90,6 +92,7 @@ class LeftMenu extends StatefulWidget {
   const LeftMenu({
     super.key,
     required this.username,
+    required this.onShowDashboard, // รับค่า callback สำหรับ dashboard
     required this.onManageCalendar,
     required this.onCreateProfile,
     required this.onmanage_profile,
@@ -111,35 +114,24 @@ class _LeftMenuState extends State<LeftMenu> {
     _loadUserImage();
   }
 
+  // แก้ไข: ดึงรูปภาพจาก Database (คอลัมน์ image_base64)
   Future<void> _loadUserImage() async {
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/user.json');
+      final dbHelper = DatabaseHelper();
+      final userMap = await dbHelper.getUser(widget.username);
 
-      if (!await file.exists()) return;
+      if (userMap != null) {
+        // ✅ แก้ไข: ใช้ชื่อคอลัมน์ 'image_base64' ให้ถูกต้อง
+        final img = userMap['image_base64'];
 
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return;
-
-      final data = jsonDecode(content);
-      if (data is! List) return;
-
-      for (final u in data) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          if (map['userid'] == widget.username) {
-            final img = map['image'];
-            if (img != null && img.toString().isNotEmpty) {
-              setState(() {
-                _imageBase64 = img.toString();
-              });
-            }
-            break;
-          }
+        if (img != null && img.toString().isNotEmpty) {
+          setState(() {
+            _imageBase64 = img.toString();
+          });
         }
       }
     } catch (e) {
-      debugPrint('LeftMenu: error loading user image: $e');
+      debugPrint('LeftMenu: error loading user image from DB: $e');
       // ถ้า error ก็ปล่อยไป ใช้ default avatar แทน
     }
   }
@@ -187,7 +179,22 @@ class _LeftMenuState extends State<LeftMenu> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                // เมนู 1: จัดการปฏิทินแจ้งเตือน
+                // เมนูใหม่ 1: จัดการกำหนดการรายวัน (ไปหน้า Dashboard)
+                ListTile(
+                  leading: const Icon(Icons.dashboard),
+                  title: const Text(
+                    'จัดการกำหนดการรายวัน',
+                    style: TextStyle(color: Colors.black),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    widget.onShowDashboard();
+                  },
+                ),
+
+                // ลบ Divider ออกเพื่อให้เป็นกลุ่มเดียวกับปฏิทิน
+
+                // เมนู 2: จัดการปฏิทินแจ้งเตือน (ไปหน้า Calendar)
                 ListTile(
                   leading: const Icon(Icons.calendar_month),
                   title: const Text(
@@ -200,9 +207,8 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                const Divider(height: 1),
-
-                // เมนู 2: เพิ่มยา
+                const Divider(height: 1), // จบหมวดการจัดการเวลา
+                // เมนู 3: เพิ่มยา
                 ListTile(
                   leading: const Icon(Icons.medication),
                   title: const Text(
@@ -215,7 +221,7 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                // เมนู 3: จัดการยา
+                // เมนู 4: จัดการยา
                 ListTile(
                   leading: const Icon(Icons.medication_liquid),
                   title: const Text(
@@ -228,9 +234,8 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                const Divider(height: 1),
-
-                // เมนู 4: เพิ่มโปรไฟล์
+                const Divider(height: 1), // จบหมวดยา
+                // เมนู 5: เพิ่มโปรไฟล์
                 ListTile(
                   leading: const Icon(Icons.person_add),
                   title: const Text(
@@ -243,7 +248,7 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                // เมนู 5: จัดการโปรไฟล์
+                // เมนู 6: จัดการโปรไฟล์
                 ListTile(
                   leading: const Icon(Icons.manage_accounts),
                   title: const Text(
@@ -256,9 +261,8 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
 
-                const Divider(height: 1),
-
-                // เมนูใหม่: ตั้งค่าการแจ้งเตือน
+                const Divider(height: 1), // จบหมวดโปรไฟล์
+                // เมนู: ตั้งค่าการแจ้งเตือน
                 ListTile(
                   leading: const Icon(Icons.notifications_active),
                   title: const Text(

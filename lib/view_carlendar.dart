@@ -13,6 +13,7 @@ import 'view_menu.dart';
 import 'add_medicine.dart';
 import 'manage_medicine.dart';
 import 'main.dart'; // สำหรับกลับไปหน้า LoginPage ตอน logout
+import 'view_dashboard.dart';
 
 class CarlendarPage extends StatefulWidget {
   final String username;
@@ -308,19 +309,31 @@ class _CarlendarPageState extends State<CarlendarPage> {
       appBar: AppBar(title: const Text('จัดการปฏิทินแจ้งเตือน')),
       drawer: LeftMenu(
         username: widget.username,
-        onManageCalendar: () {
-          // อยู่หน้านี้อยู่แล้ว แค่ปิดเมนู
-          Navigator.pop(context);
+        // --- ส่วนที่ต้องกำหนด ---
+
+        // 1. ไปหน้า Dashboard: สั่ง Push ไป
+        onShowDashboard: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DashboardPage(username: widget.username),
+            ),
+          );
         },
+
+        // 2. ไปหน้าปฏิทิน: (เราอยู่หน้านี้อยู่แล้ว) -> ปล่อยว่างเลย
+        onManageCalendar: () {
+          // ไม่ต้องทำอะไร (LeftMenu ปิด drawer ให้เอง)
+        },
+
+        // -----------------------
         onCreateProfile: () {
-          Navigator.pop(context);
           Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const CreateProfilePage()),
           );
         },
         onmanage_profile: () {
-          Navigator.pop(context);
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -330,7 +343,6 @@ class _CarlendarPageState extends State<CarlendarPage> {
           );
         },
         onAddMedicine: () {
-          Navigator.pop(context);
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -339,7 +351,6 @@ class _CarlendarPageState extends State<CarlendarPage> {
           );
         },
         onManageMedicine: () {
-          Navigator.pop(context);
           Navigator.push(
             context,
             MaterialPageRoute(
