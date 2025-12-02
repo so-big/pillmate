@@ -1,5 +1,4 @@
 // lib/view_dashboard.dart
-
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
@@ -19,6 +18,9 @@ import 'main.dart'; // มี LoginPage อยู่ในนี้
 
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:ndef/ndef.dart' as ndef;
+
+// ✅ เรียกใช้ DatabaseHelper
+import 'database_helper.dart';
 
 class DashboardPage extends StatefulWidget {
   final String username;
@@ -44,6 +46,7 @@ class _DoseItem {
 
 class _DashboardPageState extends State<DashboardPage> {
   // ---------- FILE HELPERS ----------
+  // (เหลือไว้แค่ appstatus.json และ user-stat.json ที่ยังใช้ไฟล์อยู่)
 
   Future<Directory> _appDir() async {
     return getApplicationDocumentsDirectory();
@@ -54,24 +57,9 @@ class _DashboardPageState extends State<DashboardPage> {
     return File('${dir.path}/user-stat.json');
   }
 
-  Future<File> _remindersFile() async {
+  Future<File> _appStatusFile() async {
     final dir = await _appDir();
-    return File('${dir.path}/reminders.json');
-  }
-
-  Future<File> _profilesFile() async {
-    final dir = await _appDir();
-    return File('${dir.path}/profiles.json');
-  }
-
-  Future<File> _usersFile() async {
-    final dir = await _appDir();
-    return File('${dir.path}/user.json');
-  }
-
-  Future<File> _eatedFile() async {
-    final dir = await _appDir();
-    return File('${dir.path}/eated.json');
+    return File('${dir.path}/appstatus.json');
   }
 
   // ---------- STATE ----------
@@ -80,7 +68,7 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Map<String, dynamic>> _profiles = [];
   bool _isLoadingProfiles = true;
 
-  // รายการ reminder จาก JSON
+  // รายการ reminder จาก DB
   List<Map<String, dynamic>> _reminders = [];
   bool _isLoadingReminders = true;
 
@@ -103,6 +91,12 @@ class _DashboardPageState extends State<DashboardPage> {
   late DateTime _baseDate;
   late PageController _pageController;
 
+  // ✅ ตัวแปรสถานะ NFC
+  bool _isNfcEnabled = false;
+
+  // ✅ Database Helper
+  final dbHelper = DatabaseHelper();
+
   @override
   void initState() {
     super.initState();
@@ -113,6 +107,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _baseDate = _selectedDateTime;
     _pageController = PageController(initialPage: _initialPage);
 
+    _loadNfcStatus(); // ✅ โหลดสถานะ NFC
     _loadInitialData();
   }
 
@@ -122,83 +117,72 @@ class _DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
+  // ✅ โหลดค่า NFC Status
+  Future<void> _loadNfcStatus() async {
+    try {
+      final file = await _appStatusFile();
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          final data = jsonDecode(content);
+          if (data is Map) {
+            setState(() {
+              _isNfcEnabled = data['nfc_enabled'] ?? false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Dashboard: error loading NFC status: $e');
+    }
+  }
+
   Future<void> _loadInitialData() async {
     await Future.wait([_loadProfiles(), _loadReminders(), _loadEated()]);
     // โหลดข้อมูลเสร็จแล้ว -> setup noti ล่วงหน้า
     await NortificationSetup.run(context: context, username: widget.username);
   }
 
+  // ✅ แก้ไข: โหลด Profiles จาก SQLite
   Future<void> _loadProfiles() async {
     setState(() {
       _isLoadingProfiles = true;
     });
 
     try {
-      String? accountImage;
-      try {
-        final usersFile = await _usersFile();
-        if (await usersFile.exists()) {
-          final content = await usersFile.readAsString();
-          if (content.trim().isNotEmpty) {
-            final list = jsonDecode(content);
-            if (list is List) {
-              for (final u in list) {
-                if (u is Map || u is Map<String, dynamic>) {
-                  final map = Map<String, dynamic>.from(u);
-                  if (map['userid'] == widget.username) {
-                    final img = map['image'];
-                    if (img != null && img.toString().isNotEmpty) {
-                      accountImage = img.toString();
-                    }
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('Dashboard: error loading user image: $e');
-      }
-
-      final file = await _profilesFile();
-      List<dynamic> raw = [];
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          raw = jsonDecode(content);
-        }
-      }
-
-      final filtered = raw
-          .where((p) {
-            if (p is Map<String, dynamic>) {
-              return p['createby'] == widget.username;
-            }
-            if (p is Map) return p['createby'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p))
-          .toList();
-
+      final db = await dbHelper.database;
       final profiles = <Map<String, dynamic>>[];
 
-      // โปรไฟล์ตัวเอง
-      profiles.add({
-        'name': widget.username,
-        'createby': widget.username,
-        'image': accountImage,
-      });
+      // 1. Master Profile
+      final masterUser = await dbHelper.getUser(widget.username);
+      if (masterUser != null) {
+        profiles.add({
+          'name': masterUser['userid'],
+          'createby': widget.username,
+          'image': masterUser['image_base64'], // ใช้ image_base64
+        });
+      }
 
-      // โปรไฟล์อื่น ๆ ที่ผู้ใช้สร้าง
-      profiles.addAll(filtered);
+      // 2. Sub-profiles
+      final List<Map<String, dynamic>> subs = await db.query(
+        'users',
+        where: 'sub_profile = ?',
+        whereArgs: [widget.username],
+      );
+
+      for (var s in subs) {
+        profiles.add({
+          'name': s['userid'],
+          'createby': widget.username,
+          'image': s['image_base64'],
+        });
+      }
 
       setState(() {
         _profiles = profiles;
       });
     } catch (e) {
-      debugPrint('Dashboard: error loading profiles: $e');
+      debugPrint('Dashboard: error loading profiles DB: $e');
       setState(() {
         _profiles = [];
       });
@@ -209,38 +193,49 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  // ✅ แก้ไข: โหลด Reminders จาก SQLite (calendar_alerts)
   Future<void> _loadReminders() async {
     setState(() {
       _isLoadingReminders = true;
     });
 
     try {
-      final file = await _remindersFile();
-      List<dynamic> raw = [];
+      final db = await dbHelper.database;
 
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          raw = jsonDecode(content);
-        }
-      }
+      // ดึงข้อมูลที่สร้างโดย user นี้
+      final List<Map<String, dynamic>> results = await db.query(
+        'calendar_alerts',
+        where: 'createby = ?',
+        whereArgs: [widget.username],
+      );
 
-      final filtered = raw
-          .where((r) {
-            if (r is Map<String, dynamic>) {
-              return r['createby'] == widget.username;
-            }
-            if (r is Map) return r['createby'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((r) => Map<String, dynamic>.from(r))
-          .toList();
+      // แปลง key จาก snake_case (DB) -> camelCase (UI เดิม)
+      final List<Map<String, dynamic>> mappedList = results.map((row) {
+        return {
+          'id': row['id'],
+          'createby': row['createby'],
+          'profileName': row['profile_name'],
+          'medicineId': row['medicine_id'],
+          'medicineName': row['medicine_name'],
+          'medicineDetail': row['medicine_detail'],
+          // แปลง int 0/1 เป็น bool
+          'beforeMeal': row['medicine_before_meal'] == 1,
+          'afterMeal': row['medicine_after_meal'] == 1,
+          'startDateTime': row['start_date_time'],
+          'endDateTime': row['end_date_time'],
+          'notifyByTime': row['notify_by_time'] == 1,
+          'notifyByMeal': row['notify_by_meal'] == 1,
+          'intervalMinutes': row['interval_minutes'],
+          'et': row['et'],
+          'payload': row['payload'],
+        };
+      }).toList();
 
       setState(() {
-        _reminders = filtered;
+        _reminders = mappedList;
       });
     } catch (e) {
-      debugPrint('Dashboard: error loading reminders: $e');
+      debugPrint('Dashboard: error loading reminders DB: $e');
       setState(() {
         _reminders = [];
       });
@@ -251,48 +246,47 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  // ✅ แก้ไข: โหลดประวัติการกินจาก SQLite (taken_doses)
   Future<void> _loadEated() async {
     setState(() {
       _isLoadingEated = true;
     });
 
     try {
-      final file = await _eatedFile();
-      List<dynamic> raw = [];
+      final db = await dbHelper.database;
 
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          raw = jsonDecode(content);
-        }
-      }
-
-      final filtered = raw
-          .where((e) {
-            if (e is Map<String, dynamic>) {
-              return e['userid'] == widget.username;
-            }
-            if (e is Map) return e['userid'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
-          .toList();
+      final List<Map<String, dynamic>> results = await db.query(
+        'taken_doses',
+        where: 'userid = ?',
+        whereArgs: [widget.username],
+      );
 
       final keys = <String>{};
-      for (final m in filtered) {
-        final reminderId = m['reminderId']?.toString();
-        final doseStr = m['doseDateTime']?.toString();
-        if (reminderId != null && doseStr != null && doseStr.isNotEmpty) {
+      final List<Map<String, dynamic>> mappedList = [];
+
+      for (final row in results) {
+        final reminderId = row['reminder_id']?.toString();
+        final doseStr = row['dose_date_time']?.toString();
+
+        if (reminderId != null && doseStr != null) {
           keys.add('$reminderId|$doseStr');
         }
+
+        // map กลับให้ตรงกับ structure ที่ UI อาจจะใช้ (ถ้ามี)
+        mappedList.add({
+          'userid': row['userid'],
+          'reminderId': row['reminder_id'],
+          'doseDateTime': row['dose_date_time'],
+          'takenAt': row['taken_at'],
+        });
       }
 
       setState(() {
-        _eated = filtered;
+        _eated = mappedList;
         _takenDoseKeys = keys;
       });
     } catch (e) {
-      debugPrint('Dashboard: error loading eated: $e');
+      debugPrint('Dashboard: error loading eated DB: $e');
       setState(() {
         _eated = [];
         _takenDoseKeys = {};
@@ -304,111 +298,14 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  Future<void> _appendReminder(Map<String, dynamic> result) async {
-    try {
-      final file = await _remindersFile();
-      List<dynamic> list = [];
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          list = jsonDecode(content);
-        }
-      }
-
-      final now = DateTime.now();
-
-      final reminder = <String, dynamic>{};
-      reminder.addAll(result);
-      reminder['id'] ??= now.millisecondsSinceEpoch.toString();
-      reminder['createby'] = widget.username;
-      reminder['createdAt'] ??= now.toIso8601String();
-
-      list.add(reminder);
-
-      await file.writeAsString(jsonEncode(list), flush: true);
-
-      await _loadReminders();
-      // เพิ่ม reminder ใหม่ -> ตั้ง noti ใหม่ให้ด้วย
-      await NortificationSetup.run(context: context, username: widget.username);
-    } catch (e) {
-      debugPrint('Dashboard: append reminder error: $e');
-    }
-  }
-
-  Future<void> _updateReminder(
-    Map<String, dynamic> edited,
-    Map<String, dynamic> original,
-  ) async {
-    try {
-      final file = await _remindersFile();
-      List<dynamic> list = [];
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          list = jsonDecode(content);
-        }
-      }
-
-      final now = DateTime.now();
-      final originalId =
-          original['id']?.toString() ??
-          edited['id']?.toString() ??
-          DateTime.now().millisecondsSinceEpoch.toString();
-
-      bool replaced = false;
-
-      for (int i = 0; i < list.length; i++) {
-        final item = list[i];
-        if (item is Map || item is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(item);
-          final id = map['id']?.toString();
-          final createby = map['createby']?.toString();
-
-          if (id == originalId && createby == widget.username) {
-            final updated = <String, dynamic>{};
-            updated.addAll(map); // ค่าของเดิม
-            updated.addAll(edited); // ทับด้วยค่าที่แก้ไข
-            updated['id'] = originalId;
-            updated['createby'] = widget.username;
-            updated['updatedAt'] = now.toIso8601String();
-
-            list[i] = updated;
-            replaced = true;
-            break;
-          }
-        }
-      }
-
-      if (!replaced) {
-        final newMap = <String, dynamic>{};
-        newMap.addAll(edited);
-        newMap['id'] = originalId;
-        newMap['createby'] = widget.username;
-        newMap['updatedAt'] = now.toIso8601String();
-        list.add(newMap);
-      }
-
-      await file.writeAsString(jsonEncode(list), flush: true);
-
-      await _loadReminders();
-      // แก้ไข reminder -> ตั้ง noti ใหม่
-      await NortificationSetup.run(context: context, username: widget.username);
-    } catch (e) {
-      debugPrint('Dashboard: update reminder error: $e');
-    }
-  }
-
+  // ฟังก์ชัน Logout (เหมือนเดิม แต่ใช้ user-stat.json)
   Future<void> _handleLogout() async {
     try {
       final file = await _userStatFile();
       if (await file.exists()) {
         await file.delete();
       }
-    } catch (_) {
-      // ลบไม่ได้ก็แล้วไป
-    }
+    } catch (_) {}
 
     if (!mounted) return;
 
@@ -420,20 +317,20 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _openAddReminderSheet() async {
+    // เปิดหน้า Add Carlendar
     final result = await showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // จำเป็นมาก เพื่อให้ขยายเกินครึ่งจอได้
-      useSafeArea: true, // ช่วยให้ขยายเต็มพื้นที่ Safe Area ได้สวยงามขึ้น
+      isScrollControlled: true,
+      useSafeArea: true,
       enableDrag: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.5, // เริ่มต้นครึ่งจอ
-          minChildSize: 0.25, // หดต่ำสุด
-          maxChildSize: 1.0, // ขยายสูงสุด (เต็มจอ)
-          expand: true, // ต้องเป็น false เพื่อให้ยืดหดตามการลาก
+          initialChildSize: 0.5,
+          minChildSize: 0.25,
+          maxChildSize: 1.0,
+          expand: true,
           builder: (ctx, scrollController) {
-            // สำคัญ: ต้องส่ง scrollController นี้เข้าไปใน Widget ลูก
             return CarlendarAddSheet(
               username: widget.username,
               scrollController: scrollController,
@@ -443,61 +340,31 @@ class _DashboardPageState extends State<DashboardPage> {
       },
     );
 
-    if (result != null && result is Map<String, dynamic>) {
-      debugPrint('New reminder from dashboard: $result');
-      await _appendReminder(result);
+    // เมื่อกลับมา ให้โหลดข้อมูลใหม่ (เพราะหน้า Add บันทึก DB เองแล้ว)
+    if (result != null) {
+      await _loadReminders();
+      await NortificationSetup.run(context: context, username: widget.username);
     }
   }
 
   Future<void> _openEditReminderSheet(Map<String, dynamic> reminder) async {
-    final result = await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.5,
-          minChildSize: 0.25,
-          maxChildSize: 1.0,
-          expand: true,
-          builder: (ctx, scrollController) {
-            return CarlendarEditSheet(
-              username: widget.username,
-              reminder: reminder,
-              scrollController: scrollController,
-            );
-          },
-        );
-      },
-    );
+    // (ยังไม่ได้แก้หน้า EditCalendar แต่เตรียมไว้)
+    // final result = await showModalBottomSheet(...);
+    // if (result != null) await _loadReminders();
 
-    if (result != null && result is Map<String, dynamic>) {
-      debugPrint('Edited reminder from dashboard: $result');
-      await _updateReminder(result, reminder);
-    }
+    // ชั่วคราว: ใส่ Log ไว้ก่อน เพราะคุณยังไม่ส่งไฟล์ edit_carlendar มา
+    debugPrint("Open Edit Reminder: Not implemented yet fully");
   }
 
   // ---------- PASSWORD VERIFY / CLEAR TAKEN ----------
 
+  // ✅ แก้ไข: เช็ครหัสผ่านจาก SQLite
   Future<bool> _verifyPassword(String inputPassword) async {
     try {
-      final file = await _usersFile();
-      if (!await file.exists()) return false;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return false;
-
-      final decoded = jsonDecode(content);
-      if (decoded is! List) return false;
-
-      for (final u in decoded) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          final userid = map['userid']?.toString();
-          final password = map['password']?.toString();
-          if (userid == widget.username && password == inputPassword) {
-            return true;
-          }
+      final user = await dbHelper.getUser(widget.username);
+      if (user != null) {
+        if (user['password'] == inputPassword) {
+          return true;
         }
       }
     } catch (e) {
@@ -594,6 +461,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // ✅ แก้ไข: ลบประวัติการกินจาก SQLite
   Future<void> _clearTakenForReminder(
     Map<String, dynamic> reminder,
     DateTime? time,
@@ -601,72 +469,18 @@ class _DashboardPageState extends State<DashboardPage> {
     final reminderId = reminder['id']?.toString();
     final doseIso = time?.toIso8601String();
 
-    if (reminderId == null || reminderId.isEmpty || doseIso == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('ไม่พบข้อมูลการ์ดยา ไม่สามารถเคลียร์สถานะได้'),
-        ),
-      );
-      return;
-    }
+    if (reminderId == null || doseIso == null) return;
 
     try {
-      final file = await _eatedFile();
-      List<dynamic> list = [];
+      final db = await dbHelper.database;
 
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          final decoded = jsonDecode(content);
-          if (decoded is List) {
-            list = decoded;
-          }
-        }
-      }
-
-      // ลบเฉพาะ record ของ user + reminder + เวลา (โดสนี้เท่านั้น)
-      list = list.where((e) {
-        if (e is Map || e is Map<String, dynamic>) {
-          final m = Map<String, dynamic>.from(e);
-          final uid = m['userid']?.toString();
-          final rid = m['reminderId']?.toString();
-          final d = m['doseDateTime']?.toString();
-          if (uid == widget.username && rid == reminderId && d == doseIso) {
-            return false;
-          }
-        }
-        return true;
-      }).toList();
-
-      await file.writeAsString(jsonEncode(list), flush: true);
-
-      // สร้าง eated + takenKeys ใหม่สำหรับ user นี้
-      final filteredForUser = list
-          .where((e) {
-            if (e is Map<String, dynamic>) {
-              return e['userid'] == widget.username;
-            }
-            if (e is Map) return e['userid'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
-          .toList();
-
-      final newKeys = <String>{};
-      for (final m in filteredForUser) {
-        final rid = m['reminderId']?.toString();
-        final d = m['doseDateTime']?.toString();
-        if (rid != null && d != null && d.isNotEmpty) {
-          newKeys.add('$rid|$d');
-        }
-      }
+      await db.delete(
+        'taken_doses',
+        where: 'userid = ? AND reminder_id = ? AND dose_date_time = ?',
+        whereArgs: [widget.username, reminderId, doseIso],
+      );
 
       if (!mounted) return;
-      setState(() {
-        _eated = filteredForUser;
-        _takenDoseKeys = newKeys;
-      });
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -674,7 +488,8 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
       );
 
-      // เคลียร์สถานะแล้ว -> ให้ noti future ปรับตาม
+      // โหลดข้อมูลใหม่
+      await _loadEated();
       await NortificationSetup.run(context: context, username: widget.username);
     } catch (e) {
       debugPrint('Dashboard: clearTakenForReminder error: $e');
@@ -702,7 +517,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
   DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
-  /// คืน list ของเวลาที่ต้องกินยา "ในวันเดียวกับ viewDate"
   List<DateTime> _computeDoseTimesForDay(
     Map<String, dynamic> reminder,
     DateTime viewDate,
@@ -724,19 +538,16 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final notifyByTime = reminder['notifyByTime'] == true;
 
-    // ใช้ intervalMinutes แบบใหม่อย่างเดียว ข้อมูลเก่าไม่สนใจ
     final intervalMinutes =
         int.tryParse(reminder['intervalMinutes']?.toString() ?? '') ?? 0;
 
     final startDateOnly = _dateOnly(start);
     final DateTime? endDateOnly = end != null ? _dateOnly(end) : null;
 
-    // ก่อนวันเริ่ม -> ไม่แสดง
     if (selectedDay.isBefore(startDateOnly)) {
       return [];
     }
 
-    // ถ้ามี end แล้ววันเลือกหลัง end -> ไม่แสดง
     if (endDateOnly != null && selectedDay.isAfter(endDateOnly)) {
       return [];
     }
@@ -744,7 +555,6 @@ class _DashboardPageState extends State<DashboardPage> {
     final dayStart = selectedDay;
     final dayEnd = dayStart.add(const Duration(days: 1));
 
-    // ถ้าไม่แจ้งเตือนตามเวลา หรือ intervalMinutes <= 0 -> มีแค่ start ครั้งเดียว
     if (!notifyByTime || intervalMinutes <= 0) {
       final t = start;
       if (t.isBefore(dayStart) || !t.isBefore(dayEnd)) {
@@ -753,14 +563,12 @@ class _DashboardPageState extends State<DashboardPage> {
       return [t];
     }
 
-    // เคสมี interval เป็นนาที
     if (dayEnd.isBefore(start)) return [];
     if (end != null && dayStart.isAfter(end)) return [];
 
     final stepMinutes = intervalMinutes;
     if (stepMinutes <= 0) return [];
 
-    // หาเวลาแรกของวันนั้น
     DateTime first;
     if (!dayStart.isAfter(start)) {
       first = start;
@@ -802,6 +610,7 @@ class _DashboardPageState extends State<DashboardPage> {
     return key == _scanningDoseKey;
   }
 
+  // ✅ แก้ไข: บันทึกสถานะกินยาลง SQLite
   Future<void> _markDoseTaken(
     Map<String, dynamic> reminder,
     DateTime? time,
@@ -816,43 +625,26 @@ class _DashboardPageState extends State<DashboardPage> {
     final doseIso = time.toIso8601String();
 
     try {
-      final file = await _eatedFile();
-      List<dynamic> list = [];
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          final decoded = jsonDecode(content);
-          if (decoded is List) {
-            list = decoded;
-          }
-        }
-      }
-
       final isCurrentlyTaken = _takenDoseKeys.contains(key);
-      if (isCurrentlyTaken) {
-        // กินไปแล้ว ไม่ต้องทำอะไรเพิ่ม
-        return;
-      }
+      if (isCurrentlyTaken) return;
 
       final nowIso = DateTime.now().toIso8601String();
-      final newRecord = {
+      final db = await dbHelper.database;
+
+      // Insert ลงตาราง taken_doses
+      await db.insert('taken_doses', {
         'userid': widget.username,
-        'reminderId': reminderId,
-        'doseDateTime': doseIso,
-        'takenAt': nowIso,
-      };
-      list.add(newRecord);
-
-      await file.writeAsString(jsonEncode(list), flush: true);
-
-      if (!mounted) return;
-      setState(() {
-        _takenDoseKeys.add(key);
-        _eated.add(Map<String, dynamic>.from(newRecord));
+        'reminder_id': reminderId,
+        'dose_date_time': doseIso,
+        'taken_at': nowIso,
       });
 
-      // กินยาแล้ว -> อัปเดต noti ให้ไม่เตือนโดสนี้อีก
+      if (!mounted) return;
+
+      // อัปเดต UI ทันที
+      await _loadEated();
+
+      // กินยาแล้ว -> อัปเดต noti
       await NortificationSetup.run(context: context, username: widget.username);
     } catch (e) {
       debugPrint('Dashboard: mark dose taken error: $e');
@@ -863,10 +655,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // lib/dashboard.dart (เฉพาะส่วนที่แก้ไขในคลาส _DashboardPageState)
-
-  // ... โค้ดส่วนบน (ตัดออก) ...
-
+  // ✅ แก้ไข: ปรับ Logic สแกน NFC ตาม Status
   Future<void> _scanDoseWithNfc(
     Map<String, dynamic> reminder,
     DateTime? time,
@@ -881,38 +670,32 @@ class _DashboardPageState extends State<DashboardPage> {
 
     // --- [ส่วนที่ 1: จัดการกรณีที่ "กินแล้ว" -> ให้ยกเลิกสถานะ] ---
     if (isTaken) {
-      // 1. ถามรหัสผ่านเพื่อยืนยันการยกเลิกสถานะ
       final ok = await _showClearTakenConfirmDialog();
-
       if (ok == true) {
-        // 2. ถ้าผู้ใช้ยืนยันรหัสผ่านถูกต้อง -> เคลียร์สถานะการกินยา
         await _clearTakenForReminder(reminder, time);
       } else {
-        // ยกเลิก หรือรหัสผ่านไม่ถูกต้อง
         if (!mounted) return;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('ยกเลิกการเคลียร์สถานะ')));
       }
-      return; // ออกจากฟังก์ชัน ไม่ต้องดำเนินการสแกน NFC
+      return;
     }
     // --- [สิ้นสุด ส่วนที่ 1] ---
 
     // --- [ส่วนที่ 2: จัดการกรณีที่ "ยังไม่ได้กิน" -> ให้บันทึกสถานะ] ---
 
-    // ตรวจสอบโหมด PC/Desktop
-    final isDesktop =
-        Platform.isWindows || Platform.isMacOS || Platform.isLinux;
-    if (isDesktop) {
-      debugPrint('Dashboard: Running on PC/Desktop. Skipping NFC scan.');
+    // ✅ Logic ใหม่: เช็คตามตัวแปร _isNfcEnabled
+    if (!_isNfcEnabled) {
+      debugPrint('Dashboard: NFC disabled in settings. Skipping scan.');
 
-      // Mark as taken immediately in PC mode
+      // Mark as taken immediately (Manual/PC Mode)
       await _markDoseTaken(reminder, time);
 
       if (!mounted) return;
       await _showAutoDismissDialog(
-        'บันทึกสำเร็จ (PC MODE)',
-        'ยืนยันการกินยาในโหมด PC (ไม่ใช้ NFC) แล้ว',
+        'บันทึกสำเร็จ (ปิด NFC)',
+        'ยืนยันการกินยาเรียบร้อยแล้ว (โหมดไม่ใช้ NFC)',
       );
 
       if (mounted) {
@@ -923,11 +706,10 @@ class _DashboardPageState extends State<DashboardPage> {
       }
       return;
     }
-    // --- [สิ้นสุด โหมด PC] ---
+    // --- [สิ้นสุด โหมดปิด NFC] ---
 
     // โค้ดเดิม: จัดการการสแกน NFC
 
-    // ถ้ากำลังสแกนการ์ดใบเดิมอยู่ แล้วกดซ้ำ -> ยกเลิกการสแกน
     if (_isScanningNfc && _scanningDoseKey == doseKey) {
       try {
         await FlutterNfcKit.finish(iosErrorMessage: 'ยกเลิกการสแกน');
@@ -941,7 +723,6 @@ class _DashboardPageState extends State<DashboardPage> {
       return;
     }
 
-    // ถ้ากำลังสแกนการ์ดอื่นอยู่ -> ไม่ทำอะไร
     if (_isScanningNfc && _scanningDoseKey != doseKey) {
       return;
     }
@@ -1032,7 +813,7 @@ class _DashboardPageState extends State<DashboardPage> {
         return;
       }
 
-      // ถ้าตรง ถือว่าสแกนผ่าน -> mark ว่ากินแล้ว (ไม่ toggle)
+      // ถ้าตรง ถือว่าสแกนผ่าน -> mark ว่ากินแล้ว
       await _markDoseTaken(reminder, time);
 
       if (!mounted) return;
@@ -1065,7 +846,6 @@ class _DashboardPageState extends State<DashboardPage> {
       }
     }
   }
-  // ... โค้ดส่วนล่าง (ตัดออก) ...
 
   Future<void> _showAutoDismissDialog(String title, String message) async {
     if (!mounted) return;
@@ -1378,6 +1158,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     try {
       final imgStr = imageData.toString();
+      // รูป asset ยังมีโอกาสเจอใน profile
       if (imgStr.startsWith('assets/')) {
         return CircleAvatar(radius: 22, backgroundImage: AssetImage(imgStr));
       }
@@ -1524,11 +1305,9 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(title: const Text('การแจ้งเตือน')),
       drawer: LeftMenu(
         username: widget.username,
-        // --- ส่วนที่ต้องกำหนด ---
-
-        // 1. ไปหน้า Dashboard: (เราอยู่หน้านี้อยู่แล้ว) -> ปล่อยว่างเลย
+        // 1. ไปหน้า Dashboard: (เราอยู่หน้านี้อยู่แล้ว)
         onShowDashboard: () {
-          // ไม่ต้องทำอะไร (LeftMenu ปิด drawer ให้เอง)
+          // ไม่ต้องทำอะไร
         },
 
         // 2. ไปหน้าปฏิทิน: สั่ง Push ไป
@@ -1541,7 +1320,6 @@ class _DashboardPageState extends State<DashboardPage> {
           );
         },
 
-        // -----------------------
         onCreateProfile: () {
           Navigator.push(
             context,

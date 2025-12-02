@@ -1,10 +1,10 @@
 // lib/manage_medicine.dart
 
 import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+
+// 1. นำเข้า DatabaseHelper
+import 'database_helper.dart';
 
 import 'add_medicine.dart';
 import 'edit_medicine.dart';
@@ -25,10 +25,8 @@ class _MedicineManagePageState extends State<MedicineManagePage> {
   /// 'az' = A → Z, 'za' = Z → A
   String _sortOrder = 'az';
 
-  Future<File> get _pillProfileFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/pillprofile.json');
-  }
+  // 2. ประกาศตัวแปร dbHelper
+  final dbHelper = DatabaseHelper();
 
   @override
   void initState() {
@@ -36,35 +34,26 @@ class _MedicineManagePageState extends State<MedicineManagePage> {
     _loadMedicines();
   }
 
+  // 3. แก้ไขการโหลดข้อมูลจาก SQLite
   Future<void> _loadMedicines() async {
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final file = await _pillProfileFile;
-      List<dynamic> raw = [];
+      final db = await dbHelper.database;
 
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          final decoded = jsonDecode(content);
-          if (decoded is List) {
-            raw = decoded;
-          }
-        }
-      }
+      // ดึงข้อมูลยาที่สร้างโดย user นี้
+      final List<Map<String, dynamic>> result = await db.query(
+        'medicines',
+        where: 'createby = ?',
+        whereArgs: [widget.username],
+      );
 
-      final List<Map<String, dynamic>> list = [];
-
-      for (final item in raw) {
-        if (item is Map) {
-          final m = Map<String, dynamic>.from(item);
-          if (m['createby'] == widget.username) {
-            list.add(m);
-          }
-        }
-      }
+      // แปลงเป็น List ที่แก้ไขได้ (Mutable)
+      final List<Map<String, dynamic>> list = List<Map<String, dynamic>>.from(
+        result,
+      );
 
       _applySort(list);
 
@@ -108,9 +97,8 @@ class _MedicineManagePageState extends State<MedicineManagePage> {
       ),
     );
 
-    if (result != null) {
-      await _loadMedicines();
-    }
+    // โหลดข้อมูลใหม่เสมอเมื่อกลับมา (ไม่ว่าจะกดบันทึกหรือ back)
+    await _loadMedicines();
   }
 
   Future<void> _editMedicine(Map<String, dynamic> medicine) async {
@@ -122,11 +110,11 @@ class _MedicineManagePageState extends State<MedicineManagePage> {
       ),
     );
 
-    if (result != null) {
-      await _loadMedicines();
-    }
+    // โหลดข้อมูลใหม่เสมอเมื่อกลับมา
+    await _loadMedicines();
   }
 
+  // 4. แก้ไขการลบข้อมูลใน SQLite
   Future<void> _deleteMedicine(Map<String, dynamic> medicine) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -152,28 +140,11 @@ class _MedicineManagePageState extends State<MedicineManagePage> {
     if (confirm != true) return;
 
     try {
-      final file = await _pillProfileFile;
-      if (!await file.exists()) return;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return;
-
-      final decoded = jsonDecode(content);
-      if (decoded is! List) return;
-
-      final List<dynamic> list = List<dynamic>.from(decoded);
+      final db = await dbHelper.database;
       final String targetId = (medicine['id'] ?? '').toString();
 
-      list.removeWhere((item) {
-        if (item is Map) {
-          final id = (item['id'] ?? '').toString();
-          final createBy = item['createby']?.toString();
-          return id == targetId && createBy == widget.username;
-        }
-        return false;
-      });
-
-      await file.writeAsString(jsonEncode(list), flush: true);
+      // ลบข้อมูลจากตาราง medicines
+      await db.delete('medicines', where: 'id = ?', whereArgs: [targetId]);
 
       if (!mounted) return;
 
@@ -303,8 +274,10 @@ class _MedicineManagePageState extends State<MedicineManagePage> {
               final m = _medicines[index];
               final name = (m['name'] ?? '').toString();
               final detail = (m['detail'] ?? '').toString();
-              final beforeMeal = m['beforeMeal'] == true;
-              final afterMeal = m['afterMeal'] == true;
+
+              // 5. แปลงข้อมูลจาก Integer (SQLite) เป็น Boolean
+              final beforeMeal = (m['before_meal'] == 1);
+              final afterMeal = (m['after_meal'] == 1);
 
               String mealText = '';
               if (beforeMeal) {

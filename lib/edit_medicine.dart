@@ -1,11 +1,14 @@
 // lib/edit_medicine.dart
 
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
+
+// ✅ เรียกใช้ DatabaseHelper
+import 'database_helper.dart';
 
 class EditMedicinePage extends StatefulWidget {
   final String username;
@@ -42,6 +45,10 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
   String? _customImageBase64;
 
   bool _isSaving = false;
+  final ImagePicker _picker = ImagePicker();
+
+  // ประกาศตัวแปร dbHelper
+  final dbHelper = DatabaseHelper();
 
   @override
   void initState() {
@@ -54,15 +61,34 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
       text: (m['detail'] ?? '').toString(),
     );
 
-    _beforeMeal = (m['beforeMeal'] == true);
-    _afterMeal = (m['afterMeal'] == true);
+    // ✅ ปรับ Key ให้ตรงกับ SQLite (before_meal, after_meal เก็บเป็น 0/1)
+    // แต่เพื่อความชัวร์ เผื่อ data เก่า เช็คทั้งสองแบบ
+    if (m.containsKey('before_meal')) {
+      _beforeMeal = (m['before_meal'] == 1);
+    } else {
+      _beforeMeal = (m['beforeMeal'] == true);
+    }
+
+    if (m.containsKey('after_meal')) {
+      _afterMeal = (m['after_meal'] == 1);
+    } else {
+      _afterMeal = (m['afterMeal'] == true);
+    }
 
     final img = m['image'];
     if (img is String && img.isNotEmpty) {
+      // ถ้าเป็น path asset ที่มีอยู่ในลิสต์
       if (_pillImages.contains(img)) {
         _selectedImage = img;
         _customImageBase64 = null;
-      } else {
+      }
+      // ถ้าเป็น asset path แต่ไม่อยู่ในลิสต์ (เผื่อไว้)
+      else if (img.startsWith('assets/')) {
+        _selectedImage = img;
+        _customImageBase64 = null;
+      }
+      // ถ้าไม่ใช่ asset ถือว่าเป็น Base64
+      else {
         _selectedImage = _pillImages.first;
         _customImageBase64 = img;
       }
@@ -74,49 +100,65 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
 
   bool get _usingCustomImage => _customImageBase64 != null;
 
-  Future<File> get _pillProfileFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/pillprofile.json');
-  }
+  // ✅ ฟังก์ชันย่อรูป (เหมือนเดิม)
+  Future<Uint8List> _resizeAndCenterCropToSquare(Uint8List bytes) async {
+    final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+    final ui.FrameInfo frame = await codec.getNextFrame();
+    final ui.Image src = frame.image;
 
-  Future<File> get _usersFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/user.json');
-  }
+    final int w = src.width;
+    final int h = src.height;
 
-  /// อ่าน / สร้าง list จากไฟล์ pillprofile.json
-  Future<List<dynamic>> _loadPillList() async {
-    final file = await _pillProfileFile;
-    List<dynamic> list = [];
-    if (await file.exists()) {
-      final content = await file.readAsString();
-      if (content.trim().isNotEmpty) {
-        try {
-          final decoded = jsonDecode(content);
-          if (decoded is List) list = decoded;
-        } catch (e) {
-          debugPrint('editMedicine: JSON decode error: $e');
-        }
-      }
-    }
-    return list;
-  }
+    if (w == 0 || h == 0) return bytes;
 
-  /// บันทึก list กลับลงไฟล์
-  Future<void> _savePillList(List<dynamic> list) async {
-    final file = await _pillProfileFile;
-    await file.writeAsString(jsonEncode(list), flush: true);
+    final int minSide = w < h ? w : h;
+    const double targetSize = 512.0;
+    final double scale = targetSize / minSide;
+
+    final double scaledW = w * scale;
+    final double scaledH = h * scale;
+
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    const Rect outputRect = Rect.fromLTWH(0, 0, targetSize, targetSize);
+    canvas.clipRect(outputRect);
+
+    final double dx = (targetSize - scaledW) / 2;
+    final double dy = (targetSize - scaledH) / 2;
+
+    final Rect destRect = Rect.fromLTWH(dx, dy, scaledW, scaledH);
+    final Rect srcRect = Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble());
+
+    final Paint paint = Paint();
+    canvas.drawImageRect(src, srcRect, destRect, paint);
+
+    final ui.Image outImage = await recorder.endRecording().toImage(
+      targetSize.toInt(),
+      targetSize.toInt(),
+    );
+
+    final byteData = await outImage.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
   }
 
   Future<void> _pickCustomImage() async {
     try {
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(source: ImageSource.gallery);
-
+      final XFile? picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+      );
       if (picked == null) return;
 
       final bytes = await picked.readAsBytes();
-      final base64Str = base64Encode(bytes);
+
+      Uint8List processed;
+      try {
+        processed = await _resizeAndCenterCropToSquare(bytes);
+      } catch (e) {
+        debugPrint('editMedicine: resize error: $e');
+        processed = bytes;
+      }
+
+      final base64Str = base64Encode(processed);
 
       setState(() {
         _customImageBase64 = base64Str;
@@ -130,25 +172,13 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
     }
   }
 
+  // ✅ แก้ไข: ตรวจสอบรหัสผ่านจาก SQLite
   Future<bool> _verifyPassword(String inputPassword) async {
     try {
-      final file = await _usersFile;
-      if (!await file.exists()) return false;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return false;
-
-      final decoded = jsonDecode(content);
-      if (decoded is! List) return false;
-
-      for (final u in decoded) {
-        if (u is Map || u is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(u);
-          final userid = map['userid']?.toString();
-          final password = map['password']?.toString();
-          if (userid == widget.username && password == inputPassword) {
-            return true;
-          }
+      final user = await dbHelper.getUser(widget.username);
+      if (user != null) {
+        if (user['password'] == inputPassword) {
+          return true;
         }
       }
     } catch (e) {
@@ -242,6 +272,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
     );
   }
 
+  // ✅ แก้ไข: บันทึกข้อมูลลง SQLite (UPDATE)
   Future<void> _saveMedicine() async {
     if (_isSaving) return;
 
@@ -277,65 +308,40 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
     var name = _nameController.text.trim();
     var detail = _detailController.text.trim();
 
-    if (name.length > 50) {
-      name = name.substring(0, 50);
-    }
-    if (detail.length > 100) {
-      detail = detail.substring(0, 100);
-    }
+    // ตัดคำถ้าเกิน (ป้องกัน database error แม้ TEXT จะรับได้เยอะ)
+    if (name.length > 50) name = name.substring(0, 50);
+    if (detail.length > 100) detail = detail.substring(0, 100);
 
     setState(() {
       _isSaving = true;
     });
 
     try {
-      final list = await _loadPillList();
-      final original = widget.medicine;
-      final oldId =
-          original['id']?.toString() ??
-          DateTime.now().millisecondsSinceEpoch.toString();
-      final now = DateTime.now();
-      final imageValue = _usingCustomImage
-          ? _customImageBase64
+      final db = await dbHelper.database;
+
+      final String imageValue = _usingCustomImage
+          ? _customImageBase64!
           : _selectedImage;
 
-      final createdAt =
-          original['createdAt']?.toString() ?? now.toIso8601String();
-      final createBy = original['createby']?.toString() ?? widget.username;
-
-      final updated = {
-        'id': oldId,
+      // เตรียมข้อมูลอัปเดต (ใช้ key snake_case ตาม DB)
+      final Map<String, dynamic> updatedValues = {
         'name': name,
         'detail': detail,
         'image': imageValue,
-        'beforeMeal': _beforeMeal,
-        'afterMeal': _afterMeal,
-        'createby': createBy,
-        'createdAt': createdAt,
-        'updatedAt': now.toIso8601String(),
+        'before_meal': _beforeMeal ? 1 : 0,
+        'after_meal': _afterMeal ? 1 : 0,
+        // 'createby' ไม่ต้องแก้ เพราะเป็นคนเดิม
       };
 
-      bool replaced = false;
+      final String id = widget.medicine['id'].toString();
 
-      // หา record ในไฟล์ด้วย id เดิม
-      for (int i = 0; i < list.length; i++) {
-        final item = list[i];
-        if (item is Map || item is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(item);
-          if ((map['id'] ?? '').toString() == oldId) {
-            list[i] = updated;
-            replaced = true;
-            break;
-          }
-        }
-      }
-
-      // ถ้ายังไม่เจอเลย ก็เพิ่มใหม่
-      if (!replaced) {
-        list.add(updated);
-      }
-
-      await _savePillList(list);
+      // สั่ง Update
+      await db.update(
+        'medicines',
+        updatedValues,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
 
       if (!mounted) return;
 
@@ -343,17 +349,16 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
         const SnackBar(content: Text('บันทึกการแก้ไขตัวยาเรียบร้อย')),
       );
 
-      setState(() {
-        _isSaving = false;
-      });
-
-      Navigator.pop(context, updated);
+      Navigator.pop(context, updatedValues);
     } catch (e) {
       debugPrint('editMedicine: save error: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('ไม่สามารถบันทึกข้อมูลได้: $e')));
+      }
+    } finally {
+      if (mounted) {
         setState(() {
           _isSaving = false;
         });

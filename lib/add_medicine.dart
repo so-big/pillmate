@@ -1,11 +1,14 @@
 // lib/add_medicine.dart
 
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
+
+// ✅ เรียกใช้ DatabaseHelper
+import 'database_helper.dart';
 
 class MedicineAddPage extends StatefulWidget {
   final String username;
@@ -34,106 +37,105 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
     'assets/pill/p_5.png',
   ];
 
-  late String _selectedImage;
+  late String _selectedImage; // เก็บ path ของรูปที่เลือก (ถ้าเป็น asset)
 
-  // base64 ของรูปจากเครื่อง
+  // base64 ของรูปจากเครื่อง (ถ้าเลือกจาก Gallery)
   String? _customImageBase64;
 
   bool _isSaving = false;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
     super.initState();
-    _selectedImage = _pillImages.first;
+    _selectedImage = _pillImages[0]; // เริ่มต้นเลือกรูปแรก
   }
 
-  bool get _usingCustomImage => _customImageBase64 != null;
+  // ฟังก์ชันย่อรูปและ Crop ให้เป็นสี่เหลี่ยมจัตุรัส (เหมือนหน้า Profile)
+  Future<Uint8List> _resizeAndCenterCropToSquare(Uint8List bytes) async {
+    final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+    final ui.FrameInfo frame = await codec.getNextFrame();
+    final ui.Image src = frame.image;
 
-  Future<File> get _pillProfileFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/pillprofile.json');
+    final int w = src.width;
+    final int h = src.height;
+
+    if (w == 0 || h == 0) return bytes;
+
+    final int minSide = w < h ? w : h;
+    const double targetSize = 512.0;
+    final double scale = targetSize / minSide;
+
+    final double scaledW = w * scale;
+    final double scaledH = h * scale;
+
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    const Rect outputRect = Rect.fromLTWH(0, 0, targetSize, targetSize);
+    canvas.clipRect(outputRect);
+
+    final double dx = (targetSize - scaledW) / 2;
+    final double dy = (targetSize - scaledH) / 2;
+
+    final Rect destRect = Rect.fromLTWH(dx, dy, scaledW, scaledH);
+    final Rect srcRect = Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble());
+
+    final Paint paint = Paint();
+    canvas.drawImageRect(src, srcRect, destRect, paint);
+
+    final ui.Image outImage = await recorder.endRecording().toImage(
+      targetSize.toInt(),
+      targetSize.toInt(),
+    );
+
+    final byteData = await outImage.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
   }
 
-  /// อ่าน / สร้าง list จากไฟล์ pillprofile.json
-  Future<List<dynamic>> _loadPillList() async {
-    final file = await _pillProfileFile;
-    List<dynamic> list = [];
-    if (await file.exists()) {
-      final content = await file.readAsString();
-      if (content.trim().isNotEmpty) {
-        try {
-          final decoded = jsonDecode(content);
-          if (decoded is List) list = decoded;
-        } catch (e) {
-          debugPrint('medicine_add: JSON decode error: $e');
-        }
-      }
-    }
-    return list;
-  }
-
-  /// บันทึก list กลับลงไฟล์
-  Future<void> _savePillList(List<dynamic> list) async {
-    final file = await _pillProfileFile;
-    await file.writeAsString(jsonEncode(list), flush: true);
-  }
-
-  Future<void> _pickCustomImage() async {
+  Future<void> _pickFromGallery() async {
     try {
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(source: ImageSource.gallery);
-
+      final XFile? picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+      );
       if (picked == null) return;
 
       final bytes = await picked.readAsBytes();
-      final base64Str = base64Encode(bytes);
+
+      Uint8List processed;
+      try {
+        processed = await _resizeAndCenterCropToSquare(bytes);
+      } catch (e) {
+        debugPrint('Error resizing/cropping image: $e');
+        processed = bytes;
+      }
+
+      final base64Str = base64Encode(processed);
 
       setState(() {
         _customImageBase64 = base64Str;
+        // ถ้าเลือกรูปเอง ให้ path asset เป็นค่าว่างหรือค่าเดิมก็ได้ (แต่ UI จะเช็ค _customImageBase64 ก่อน)
       });
     } catch (e) {
-      debugPrint('medicine_add: pick image error: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('เกิดข้อผิดพลาดในการเลือกรูปภาพ')),
-      );
+      debugPrint('Error picking image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('เลือกรูปไม่สำเร็จ')));
+      }
     }
   }
 
-  /// บันทึกข้อมูลตัวยาลง JSON
-  Future<void> _saveMedicine() async {
-    if (_isSaving) return;
+  void _selectPillImage(int index) {
+    setState(() {
+      _selectedImage = _pillImages[index];
+      _customImageBase64 = null; // เคลียร์รูป Custom ออกถ้ากลับมาเลือก Asset
+    });
+  }
 
+  // ✅ ฟังก์ชันบันทึกข้อมูลลง SQLite
+  Future<void> _saveMedicine() async {
     if (!_formKey.currentState!.validate()) {
       return;
-    }
-
-    if (!_beforeMeal && !_afterMeal) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('กรุณาเลือกว่าต้องกินก่อนหรือหลังอาหารอย่างน้อย 1 แบบ'),
-        ),
-      );
-      return;
-    }
-
-    if (_beforeMeal && _afterMeal) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('เลือกได้อย่างใดอย่างหนึ่ง: ก่อนอาหาร หรือ หลังอาหาร'),
-        ),
-      );
-      return;
-    }
-
-    var name = _nameController.text.trim();
-    var detail = _detailController.text.trim();
-
-    if (name.length > 50) {
-      name = name.substring(0, 50);
-    }
-    if (detail.length > 100) {
-      detail = detail.substring(0, 100);
     }
 
     setState(() {
@@ -141,226 +143,49 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
     });
 
     try {
-      final list = await _loadPillList();
-      final now = DateTime.now();
-      final imageValue = _usingCustomImage
-          ? _customImageBase64
-          : _selectedImage;
+      final dbHelper = DatabaseHelper();
+      final db = await dbHelper.database;
 
-      final data = {
-        'id': now.millisecondsSinceEpoch.toString(),
-        'name': name,
-        'detail': detail,
-        'image': imageValue,
-        'beforeMeal': _beforeMeal,
-        'afterMeal': _afterMeal,
+      // เตรียมข้อมูล
+      // ถ้ามี customImage ให้ใช้ base64, ถ้าไม่มีให้ใช้ path asset
+      final String imageToSave = _customImageBase64 ?? _selectedImage;
+
+      final String id = DateTime.now().millisecondsSinceEpoch.toString();
+
+      final Map<String, dynamic> row = {
+        'id': id,
+        'name': _nameController.text.trim(),
+        'detail': _detailController.text.trim(),
+        'image': imageToSave,
+        'before_meal': _beforeMeal ? 1 : 0, // SQLite ไม่มี bool ต้องใช้ int
+        'after_meal': _afterMeal ? 1 : 0,
         'createby': widget.username,
-        'createdAt': now.toIso8601String(),
+        'created_at': DateTime.now().toIso8601String(),
       };
 
-      list.add(data);
-      await _savePillList(list);
+      // บันทึกลงตาราง medicines
+      await db.insert('medicines', row);
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('บันทึกข้อมูลตัวยาเรียบร้อย')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('บันทึกข้อมูลยาเรียบร้อย')));
 
-      setState(() {
-        _isSaving = false;
-      });
-
-      Navigator.pop(context, data);
+      Navigator.pop(context); // ปิดหน้าจอ
     } catch (e) {
-      debugPrint('medicine_add: save error: $e');
+      debugPrint('Error saving medicine to DB: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')));
+    } finally {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('ไม่สามารถบันทึกข้อมูลได้: $e')));
         setState(() {
           _isSaving = false;
         });
       }
     }
-  }
-
-  Widget _buildPreviewImage() {
-    if (_usingCustomImage) {
-      try {
-        final bytes = base64Decode(_customImageBase64!);
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(40),
-          child: SizedBox(
-            width: 80,
-            height: 80,
-            child: Image.memory(bytes, fit: BoxFit.cover),
-          ),
-        );
-      } catch (_) {
-        return const CircleAvatar(
-          radius: 40,
-          child: Icon(Icons.medication, size: 30),
-        );
-      }
-    } else {
-      return CircleAvatar(
-        radius: 40,
-        backgroundColor: Colors.white,
-        child: ClipOval(
-          child: Image.asset(
-            _selectedImage,
-            width: 64,
-            height: 64,
-            fit: BoxFit.contain,
-          ),
-        ),
-      );
-    }
-  }
-
-  Widget _buildPillImageSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Center(child: _buildPreviewImage()),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 90,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _pillImages.length + 1,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              if (index < _pillImages.length) {
-                final path = _pillImages[index];
-                final isSelected = !_usingCustomImage && path == _selectedImage;
-
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _customImageBase64 = null;
-                      _selectedImage = path;
-                    });
-                  },
-                  child: Container(
-                    width: 80,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected ? Colors.teal : Colors.grey.shade300,
-                        width: isSelected ? 2 : 1,
-                      ),
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.all(6),
-                    child: Image.asset(path, fit: BoxFit.contain),
-                  ),
-                );
-              }
-
-              final isCustomSelected = _usingCustomImage;
-
-              return GestureDetector(
-                onTap: _pickCustomImage,
-                child: Container(
-                  width: 80,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isCustomSelected
-                          ? Colors.teal
-                          : Colors.grey.shade300,
-                      width: isCustomSelected ? 2 : 1,
-                    ),
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.all(6),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.add_a_photo, color: Colors.black54),
-                      SizedBox(height: 4),
-                      Text(
-                        'เลือกรูป\nจากเครื่อง',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, color: Colors.black87),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMealCheckboxes() {
-    return Row(
-      children: [
-        Expanded(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Checkbox(
-                value: _beforeMeal,
-                onChanged: (v) {
-                  setState(() {
-                    _beforeMeal = v ?? false;
-                    if (_beforeMeal) _afterMeal = false;
-                  });
-                },
-              ),
-              const Flexible(
-                child: Text(
-                  'ก่อนอาหาร',
-                  style: TextStyle(fontSize: 14, color: Colors.black87),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Checkbox(
-                value: _afterMeal,
-                onChanged: (v) {
-                  setState(() {
-                    _afterMeal = v ?? false;
-                    if (_afterMeal) _beforeMeal = false;
-                  });
-                },
-              ),
-              const Flexible(
-                child: Text(
-                  'หลังอาหาร',
-                  style: TextStyle(fontSize: 14, color: Colors.black87),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
   }
 
   @override
@@ -373,114 +198,163 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('เพิ่มตัวยา')),
+      appBar: AppBar(title: const Text('เพิ่มยาใหม่')),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          padding: const EdgeInsets.all(16.0),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'ชื่อยา *',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                // ส่วนแสดงรูปภาพที่เลือก
+                Center(
+                  child: Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.teal, width: 2),
+                    ),
+                    child: _customImageBase64 != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.memory(
+                              base64Decode(_customImageBase64!),
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Image.asset(
+                              _selectedImage,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
                   ),
                 ),
+                const SizedBox(height: 16),
+
+                const Text(
+                  'เลือกรูปยา',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
+
+                // Grid เลือกรูปจาก Assets
+                SizedBox(
+                  height: 60,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _pillImages.length,
+                    itemBuilder: (context, index) {
+                      final isSelected =
+                          (_customImageBase64 == null &&
+                          _selectedImage == _pillImages[index]);
+                      return GestureDetector(
+                        onTap: () => _selectPillImage(index),
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.teal.withOpacity(0.2)
+                                : Colors.transparent,
+                            border: Border.all(
+                              color: isSelected
+                                  ? Colors.teal
+                                  : Colors.grey.shade300,
+                              width: 2,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Image.asset(
+                            _pillImages[index],
+                            width: 40,
+                            height: 40,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ปุ่มเลือกจาก Gallery
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _pickFromGallery,
+                    icon: const Icon(Icons.photo_library),
+                    label: const Text('เลือกรูปจากเครื่อง'),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // ชื่อยา
                 TextFormField(
                   controller: _nameController,
-                  style: const TextStyle(color: Colors.black87),
-                  decoration: InputDecoration(
-                    hintText: 'ระบุชื่อยา (ไม่เกิน 50 ตัวอักษร)',
-                    hintStyle: const TextStyle(color: Colors.black45),
+                  // ✅ กำหนดสีตัวอักษรเป็นสีดำ
+                  style: const TextStyle(color: Colors.black),
+                  decoration: const InputDecoration(
+                    labelText: 'ชื่อยา *',
+                    border: OutlineInputBorder(),
                     filled: true,
-                    fillColor: Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
+                    fillColor: Colors.white,
                   ),
-                  validator: (value) {
-                    final v = value?.trim() ?? '';
-                    if (v.isEmpty) {
-                      return 'กรุณาระบุชื่อยา';
-                    }
-                    if (v.length > 50) {
-                      return 'ชื่อยาต้องไม่เกิน 50 ตัวอักษร';
+                  validator: (val) {
+                    if (val == null || val.trim().isEmpty) {
+                      return 'กรุณากรอกชื่อยา';
                     }
                     return null;
                   },
                 ),
-
                 const SizedBox(height: 16),
 
-                const Text(
-                  'เลือกรูปตัวยา',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildPillImageSelector(),
-
-                const SizedBox(height: 16),
-
-                const Text(
-                  'เวลารับประทาน',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                _buildMealCheckboxes(),
-
-                const SizedBox(height: 16),
-
-                const Text(
-                  'สรรพคุณ (ไม่จำเป็นต้องระบุ)',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 8),
+                // รายละเอียด / สรรพคุณ
                 TextFormField(
                   controller: _detailController,
                   maxLines: 3,
-                  style: const TextStyle(color: Colors.black87),
-                  decoration: InputDecoration(
-                    hintText:
-                        'สรรพคุณหรือรายละเอียดเพิ่มเติมของยา (ไม่เกิน 100 ตัวอักษร)',
-                    hintStyle: const TextStyle(color: Colors.black45),
+                  // ✅ กำหนดสีตัวอักษรเป็นสีดำ
+                  style: const TextStyle(color: Colors.black),
+                  decoration: const InputDecoration(
+                    labelText: 'สรรพคุณ / รายละเอียด',
+                    border: OutlineInputBorder(),
                     filled: true,
-                    fillColor: Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
+                    fillColor: Colors.white,
                   ),
-                  validator: (value) {
-                    final v = value?.trim() ?? '';
-                    if (v.length > 100) {
-                      return 'สรรพคุณต้องไม่เกิน 100 ตัวอักษร';
-                    }
-                    return null;
+                ),
+                const SizedBox(height: 16),
+
+                // เงื่อนไขการกินยา
+                const Text(
+                  'ช่วงเวลาการทานยา',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                CheckboxListTile(
+                  title: const Text('ก่อนอาหาร'),
+                  value: _beforeMeal,
+                  onChanged: (val) {
+                    setState(() {
+                      _beforeMeal = val ?? false;
+                    });
                   },
+                  activeColor: Colors.teal,
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+                CheckboxListTile(
+                  title: const Text('หลังอาหาร'),
+                  value: _afterMeal,
+                  onChanged: (val) {
+                    setState(() {
+                      _afterMeal = val ?? false;
+                    });
+                  },
+                  activeColor: Colors.teal,
+                  controlAffinity: ListTileControlAffinity.leading,
                 ),
 
                 const SizedBox(height: 24),

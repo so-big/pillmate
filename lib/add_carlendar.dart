@@ -6,13 +6,16 @@ import 'dart:ui'; // <--- สำคัญมาก! ต้องมีบรร�
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:path_provider/path_provider.dart'; // ✅ ต้องใช้เพื่ออ่านไฟล์ appstatus.json
 
 import 'create_profile.dart';
 import 'add_medicine.dart';
 
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:ndef/ndef.dart' as ndef;
+
+// ✅ เรียกใช้ DatabaseHelper
+import 'database_helper.dart';
 
 class CarlendarAddSheet extends StatefulWidget {
   final String username;
@@ -50,25 +53,11 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
 
   bool _isSaving = false;
 
-  Future<File> get _profilesFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/profiles.json');
-  }
+  // ✅ ตัวแปรเก็บสถานะ NFC จาก json
+  bool _isNfcEnabled = false;
 
-  Future<File> get _usersFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/user.json');
-  }
-
-  Future<File> get _pillProfileFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/pillprofile.json');
-  }
-
-  Future<File> get _calendarFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/carlendar.json');
-  }
+  // ประกาศตัวแปร dbHelper
+  final dbHelper = DatabaseHelper();
 
   @override
   void initState() {
@@ -76,70 +65,68 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     _endDateTime = _startDateTime;
     _loadProfiles();
     _loadMedicines();
+    _loadNfcStatus(); // ✅ โหลดสถานะ NFC
   }
 
+  // ✅ ฟังก์ชันโหลดสถานะ NFC จาก appstatus.json
+  Future<void> _loadNfcStatus() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/appstatus.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          final data = jsonDecode(content);
+          if (data is Map) {
+            setState(() {
+              _isNfcEnabled = data['nfc_enabled'] ?? false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('CarlendarAdd: error loading NFC status: $e');
+      // ถ้า error ให้ถือว่าปิด NFC ไว้ก่อนเพื่อความปลอดภัย
+      setState(() {
+        _isNfcEnabled = false;
+      });
+    }
+  }
+
+  // ✅ แก้ไข: โหลดโปรไฟล์จาก SQLite
   Future<void> _loadProfiles() async {
     setState(() {
       _isLoading = true;
     });
 
     try {
-      String? accountImage;
-      try {
-        final usersFile = await _usersFile;
-        if (await usersFile.exists()) {
-          final content = await usersFile.readAsString();
-          if (content.trim().isNotEmpty) {
-            final list = jsonDecode(content);
-            if (list is List) {
-              for (final u in list) {
-                if (u is Map || u is Map<String, dynamic>) {
-                  final map = Map<String, dynamic>.from(u);
-                  if (map['userid'] == widget.username) {
-                    final img = map['image'];
-                    if (img != null && img.toString().isNotEmpty) {
-                      accountImage = img.toString();
-                    }
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('CarlendarAdd: error loading user image: $e');
-      }
-
-      final file = await _profilesFile;
-      List<dynamic> raw = [];
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          raw = jsonDecode(content);
-        }
-      }
-
-      final filtered = raw
-          .where((p) {
-            if (p is Map<String, dynamic>) {
-              return p['createby'] == widget.username;
-            }
-            if (p is Map) return p['createby'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p));
-
+      final db = await dbHelper.database;
       final profiles = <Map<String, dynamic>>[];
 
-      profiles.add({
-        'name': widget.username,
-        'createby': widget.username,
-        'image': accountImage,
-      });
+      // 1. โหลด Master Profile
+      final masterUser = await dbHelper.getUser(widget.username);
+      if (masterUser != null) {
+        profiles.add({
+          'name': masterUser['userid'], // ใน DB ใช้ userid เป็นชื่อ
+          'createby': widget.username,
+          'image': masterUser['image_base64'], // ใน DB ใช้ image_base64
+        });
+      }
 
-      profiles.addAll(filtered);
+      // 2. โหลด Sub-profiles
+      final List<Map<String, dynamic>> subs = await db.query(
+        'users',
+        where: 'sub_profile = ?',
+        whereArgs: [widget.username],
+      );
+
+      for (var p in subs) {
+        profiles.add({
+          'name': p['userid'],
+          'createby': widget.username,
+          'image': p['image_base64'],
+        });
+      }
 
       setState(() {
         _profiles = profiles;
@@ -148,7 +135,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
             : null;
       });
     } catch (e) {
-      debugPrint('CarlendarAdd: error loading profiles: $e');
+      debugPrint('CarlendarAdd: error loading profiles DB: $e');
       setState(() {
         _profiles = [];
       });
@@ -159,41 +146,30 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     }
   }
 
+  // ✅ แก้ไข: โหลดรายการยาจาก SQLite
   Future<void> _loadMedicines() async {
     setState(() {
       _isLoadingMedicines = true;
     });
 
     try {
-      final file = await _pillProfileFile;
-      List<dynamic> raw = [];
+      final db = await dbHelper.database;
 
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          raw = jsonDecode(content);
-        }
-      }
+      final List<Map<String, dynamic>> result = await db.query(
+        'medicines',
+        where: 'createby = ?',
+        whereArgs: [widget.username],
+      );
 
-      final filtered = raw
-          .where((m) {
-            if (m is Map<String, dynamic>) {
-              return m['createby'] == widget.username;
-            }
-            if (m is Map) return m['createby'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((m) => Map<String, dynamic>.from(m))
-          .toList();
-
+      // แปลงเป็น List<Map> และเก็บไว้
       setState(() {
-        _medicines = filtered;
+        _medicines = List<Map<String, dynamic>>.from(result);
         if (_medicines.isNotEmpty && _selectedMedicineId == null) {
           _selectedMedicineId = _medicines.first['id']?.toString();
         }
       });
     } catch (e) {
-      debugPrint('CarlendarAdd: error loading medicines: $e');
+      debugPrint('CarlendarAdd: error loading medicines DB: $e');
       setState(() {
         _medicines = [];
       });
@@ -205,7 +181,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
   }
 
   Widget _buildProfileAvatar(dynamic imageData) {
-    if (imageData == null || imageData.toString().isNotEmpty == false) {
+    if (imageData == null || imageData.toString().isEmpty) {
       return const CircleAvatar(
         radius: 16,
         child: Icon(Icons.person, size: 18),
@@ -270,12 +246,6 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     );
 
     await _loadMedicines();
-
-    if (result is Map && result['id'] != null) {
-      setState(() {
-        _selectedMedicineId = result['id'].toString();
-      });
-    }
   }
 
   Future<void> _pickStartDate() async {
@@ -493,7 +463,6 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     );
   }
 
-  // ฟอร์แมตช่วงเวลาให้เป็น HH.MM
   String _formatIntervalLabel() {
     final h = _intervalMinutes ~/ 60;
     final m = _intervalMinutes % 60;
@@ -615,9 +584,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
                   ElevatedButton(
                     onPressed: () {
                       int total = tempHour * 60 + tempMinute;
-                      // ไม่ให้เป็น 0 นาที
                       if (total <= 0) total = 1;
-                      // จำกัดไม่เกิน 24 ชั่วโมง
                       if (total > 24 * 60) total = 24 * 60;
 
                       setState(() {
@@ -653,6 +620,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     return '$hour:$minute';
   }
 
+  // ✅ แก้ไข Logic การบันทึก: เพิ่ม Dialog Box และ Timeout 15 วินาที
   Future<void> _handleSave() async {
     if (_isSaving) return;
 
@@ -670,7 +638,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
       return;
     }
 
-    // หาเม็ดยาที่เลือก
+    // หาเม็ดยาที่เลือกจาก List ที่โหลดมาจาก DB
     Map<String, dynamic>? med;
     try {
       med = _medicines.firstWhere(
@@ -693,21 +661,18 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     if (name.length > 50) name = name.substring(0, 50);
     if (detail.length > 100) detail = detail.substring(0, 100);
 
-    bool beforeMeal = med['beforeMeal'] == true;
-    bool afterMeal = med['afterMeal'] == true;
+    bool beforeMeal = (med['before_meal'] == 1);
+    bool afterMeal = (med['after_meal'] == 1);
 
-    // กันเคสข้อมูลเน่า
     if (!beforeMeal && !afterMeal) {
       beforeMeal = true;
       afterMeal = false;
     } else if (beforeMeal && afterMeal) {
-      // ถ้าดันเป็น true ทั้งคู่ เอา "ก่อนอาหาร" เป็นค่า default
       afterMeal = false;
     }
 
     final flag = beforeMeal ? '1' : '2';
 
-    // et แสดงแบบ HH.MM จาก intervalMinutes
     final h = _intervalMinutes ~/ 60;
     final m = _intervalMinutes % 60;
     final et =
@@ -715,36 +680,60 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
 
     final profileName = _selectedProfileName!.trim();
 
-    // payload ที่จะเขียนลง NFC
     final payloadText = '$name~$detail~e=$flag~et=$et~$profileName';
 
     setState(() {
       _isSaving = true;
     });
 
-    // --- ส่วนที่เพิ่ม/แก้ไข เพื่อรองรับ PC Mode ---
-    final isDesktop =
-        Platform.isWindows || Platform.isMacOS || Platform.isLinux;
     String? nfcTagId;
-    bool nfcWriteSuccess = false;
 
-    if (isDesktop) {
-      // โหมด PC: ข้าม NFC
-      debugPrint(
-        'CarlendarAdd: Running on PC/Desktop. Skipping NFC operation.',
-      );
+    // ✅ Logic ใหม่: เช็คตามการตั้งค่า NFC ใน json
+    if (_isNfcEnabled) {
+      // ===== กรณีเปิดใช้ NFC =====
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('บันทึกในโหมด PC (ไม่ใช้ NFC)')),
-      );
-      nfcWriteSuccess = true;
-      nfcTagId = 'PC-MODE-${DateTime.now().millisecondsSinceEpoch}';
-    } else {
-      // โหมด Mobile (รองรับ NFC)
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('กรุณาแตะแท็ก NFC เพื่อบันทึกการแจ้งเตือน'),
-        ),
+      // ตัวแปรเก็บ Context ของ Dialog สแกน เพื่อใช้ปิดทีหลัง
+      BuildContext? scanDialogContext;
+
+      // แสดง Dialog "กรุณาแตะ" กลางจอ
+      showDialog(
+        context: context,
+        barrierDismissible: false, // บังคับให้กดปุ่มยกเลิกเท่านั้น
+        builder: (ctx) {
+          scanDialogContext = ctx;
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.nfc, size: 50, color: Colors.black),
+                SizedBox(height: 16),
+                Text(
+                  'กรุณาแตะ tag nfc ที่เซ็นเซอร์เพื่อบันทึกค่า',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx); // ปิด Dialog (User Cancel)
+                  // หมายเหตุ: การ cancel poll ของ NFC อาจทำไม่ได้ทันทีใน library นี้
+                  // แต่เราจะปิด dialog ไปก่อน
+                },
+                child: const Text(
+                  'ยกเลิก',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          );
+        },
       );
 
       try {
@@ -753,13 +742,12 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
           throw 'อุปกรณ์นี้ไม่รองรับ NFC หรือยังไม่ได้เปิดใช้งาน';
         }
 
+        // Poll พร้อม Timeout 15 วินาที
         final tag = await FlutterNfcKit.poll(
           timeout: const Duration(seconds: 15),
           iosMultipleTagMessage: 'พบหลายแท็ก',
           iosAlertMessage: 'แตะแท็กที่ต้องการ',
         );
-
-        debugPrint('CarlendarAdd: NFC tag = $tag');
 
         if (tag.ndefWritable != true) {
           throw 'แท็กนี้ไม่สามารถเขียน NDEF ได้';
@@ -769,81 +757,102 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
         await FlutterNfcKit.writeNDEFRecords([record]);
 
         nfcTagId = tag.id;
-        nfcWriteSuccess = true;
 
         try {
           await FlutterNfcKit.finish(iosAlertMessage: 'สำเร็จ');
         } catch (_) {}
+
+        // ปิด Dialog สแกนเมื่อสำเร็จ (ถ้ายังเปิดอยู่)
+        if (scanDialogContext != null && scanDialogContext!.mounted) {
+          Navigator.pop(scanDialogContext!);
+          scanDialogContext = null;
+        }
       } catch (e) {
+        // กรณี Error หรือ Timeout หรือ User Cancel
         debugPrint('CarlendarAdd: NFC write error: $e');
+
         try {
           await FlutterNfcKit.finish(iosErrorMessage: 'ล้มเหลว');
         } catch (_) {}
 
+        // 1. ปิด Dialog สแกนก่อน (ถ้ายังเปิดอยู่)
+        if (scanDialogContext != null && scanDialogContext!.mounted) {
+          Navigator.pop(scanDialogContext!);
+          scanDialogContext = null;
+        }
+
+        // 2. แสดง Dialog Error (ถ้าไม่ใช่ User Cancel เอง)
+        // เพื่อความง่าย เราจะเช็ค error message หรือแสดง error dialog เสมอถ้าไม่สำเร็จ
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('ไม่สามารถบันทึกบน NFC ได้: $e')),
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: Colors.white,
+              title: const Text(
+                'ผิดพลาด',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: const Text(
+                'การบันทึกข้อมูลลง NFC ไม่สำเร็จ\nกรุณาตรวจสอบระบบ sensor และ tag nfc',
+                style: TextStyle(color: Colors.black),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(
+                    'ตกลง',
+                    style: TextStyle(color: Colors.teal),
+                  ),
+                ),
+              ],
+            ),
           );
+
           setState(() {
             _isSaving = false;
           });
         }
-        return;
+        return; // ออกจากฟังก์ชัน ไม่บันทึกลง DB
       }
+    } else {
+      // ===== กรณีปิด NFC (บันทึกเลย) =====
+      debugPrint('CarlendarAdd: NFC is disabled. Saving to DB only.');
+      nfcTagId =
+          'MANUAL-${DateTime.now().millisecondsSinceEpoch}'; // Gen ID จำลอง
     }
 
-    // *** ส่วนการบันทึกลงไฟล์ JSON ***
-    if (!nfcWriteSuccess) {
-      setState(() {
-        _isSaving = false;
-      });
-      return;
-    }
-
+    // *** ส่วนการบันทึกลง SQLite ***
     try {
-      final calFile = await _calendarFile;
-      List<dynamic> calList = [];
-      if (await calFile.exists()) {
-        final content = await calFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          try {
-            final decoded = jsonDecode(content);
-            if (decoded is List) calList = decoded;
-          } catch (e) {
-            debugPrint('CarlendarAdd: calendar JSON decode error: $e');
-          }
-        }
-      }
-
       final now = DateTime.now();
+      final db = await dbHelper.database;
 
-      final entry = {
+      // เตรียมข้อมูลลงตาราง calendar_alerts
+      final Map<String, dynamic> row = {
         'id': now.millisecondsSinceEpoch.toString(),
         'createby': widget.username,
-
-        'profileName': profileName,
-        'medicineId': _selectedMedicineId,
-        'medicineName': name,
-        'medicineDetail': detail,
-        'medicineBeforeMeal': beforeMeal,
-        'medicineAfterMeal': afterMeal,
-
-        'startDateTime': _startDateTime.toIso8601String(),
-        'endDateTime': _endDateTime.toIso8601String(),
-        'notifyByTime': _notifyByTime,
-        'notifyByMeal': _notifyByMeal,
-        'intervalMinutes': _intervalMinutes,
-        'intervalHours': (_intervalMinutes / 60).round(),
+        'profile_name': profileName,
+        'medicine_id': _selectedMedicineId,
+        'medicine_name': name,
+        'medicine_detail': detail,
+        'medicine_before_meal': beforeMeal ? 1 : 0,
+        'medicine_after_meal': afterMeal ? 1 : 0,
+        'start_date_time': _startDateTime.toIso8601String(),
+        'end_date_time': _endDateTime.toIso8601String(),
+        'notify_by_time': _notifyByTime ? 1 : 0,
+        'notify_by_meal': _notifyByMeal ? 1 : 0,
+        'interval_minutes': _intervalMinutes,
+        'interval_hours': (_intervalMinutes / 60).round(),
         'et': et,
-
-        'nfcId': nfcTagId,
+        'nfc_id': nfcTagId,
         'payload': payloadText,
-
-        'createdAt': now.toIso8601String(),
+        'created_at': now.toIso8601String(),
       };
 
-      calList.add(entry);
-      await calFile.writeAsString(jsonEncode(calList), flush: true);
+      // บันทึกลง SQLite
+      await db.insert('calendar_alerts', row);
 
       if (!mounted) return;
 
@@ -855,9 +864,9 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
         _isSaving = false;
       });
 
-      Navigator.pop(context, entry);
+      Navigator.pop(context, row);
     } catch (e) {
-      debugPrint('CarlendarAdd: JSON save error: $e');
+      debugPrint('CarlendarAdd: SQLite save error: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -869,9 +878,6 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     }
   }
 
-  // --------------------------------------------------------------------------
-  // ส่วน Build UI ที่แก้ไขให้รองรับเมาส์ลากบน PC
-  // --------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -879,24 +885,15 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
       child: Material(
         color: Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-
-        // --- 1. ครอบ ScrollConfiguration เพื่อให้เมาส์ลากได้ ---
         child: ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(
-            dragDevices: {
-              PointerDeviceKind.touch,
-              PointerDeviceKind.mouse, // อนุญาตให้เมาส์คลิกลากได้
-            },
+            dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
           ),
           child: ListView(
-            controller:
-                widget.scrollController, // Link กับ DraggableScrollableSheet
-            // --- 2. บังคับให้ Scroll ได้เสมอ ---
+            controller: widget.scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
-
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
-              // แถบลาก (Handle)
               Center(
                 child: Container(
                   width: 40,
@@ -1348,9 +1345,12 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text(
-                          'บันทึกการแจ้งเตือนบน NFC',
-                          style: TextStyle(
+                      : Text(
+                          // ✅ ข้อความเปลี่ยนตามสถานะ NFC
+                          _isNfcEnabled
+                              ? 'บันทึกการแจ้งเตือนบน NFC'
+                              : 'บันทึกการแจ้งเตือน',
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
