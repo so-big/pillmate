@@ -55,10 +55,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
   bool _isSaving = false;
 
-  // ✅ ตัวแปรเก็บสถานะ NFC จาก json
+  // ✅ ตัวแปรเก็บสถานะ NFC จาก json (Config App)
   bool _isNfcEnabled = false;
 
-  // ✅ Database Helper
+  // ✅ Database Helper Instance
   final dbHelper = DatabaseHelper();
 
   @override
@@ -105,10 +105,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
     _loadProfiles();
     _loadMedicines();
-    _loadNfcStatus(); // ✅ โหลดสถานะ NFC
+    _loadNfcStatus(); // ✅ โหลดสถานะ NFC Config
   }
 
-  // ✅ ฟังก์ชันโหลดสถานะ NFC จาก appstatus.json
+  // ✅ ฟังก์ชันโหลดสถานะ NFC จาก appstatus.json (ส่วนนี้ยังคงใช้ไฟล์เพราะเป็น Config เครื่อง)
   Future<void> _loadNfcStatus() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -118,17 +118,21 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content);
           if (data is Map) {
-            setState(() {
-              _isNfcEnabled = data['nfc_enabled'] ?? false;
-            });
+            if (mounted) {
+              setState(() {
+                _isNfcEnabled = data['nfc_enabled'] ?? false;
+              });
+            }
           }
         }
       }
     } catch (e) {
       debugPrint('CarlendarEdit: error loading NFC status: $e');
-      setState(() {
-        _isNfcEnabled = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isNfcEnabled = false;
+        });
+      }
     }
   }
 
@@ -177,19 +181,25 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
             : null;
       }
 
-      setState(() {
-        _profiles = profiles;
-        _selectedProfileName = selected;
-      });
+      if (mounted) {
+        setState(() {
+          _profiles = profiles;
+          _selectedProfileName = selected;
+        });
+      }
     } catch (e) {
       debugPrint('CarlendarEdit: error loading profiles DB: $e');
-      setState(() {
-        _profiles = [];
-      });
+      if (mounted) {
+        setState(() {
+          _profiles = [];
+        });
+      }
     } finally {
-      setState(() {
-        _isLoadingProfiles = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoadingProfiles = false;
+        });
+      }
     }
   }
 
@@ -218,19 +228,25 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         }
       }
 
-      setState(() {
-        _medicines = medList;
-        _selectedMedicineId = selected;
-      });
+      if (mounted) {
+        setState(() {
+          _medicines = medList;
+          _selectedMedicineId = selected;
+        });
+      }
     } catch (e) {
       debugPrint('CarlendarEdit: error loading medicines DB: $e');
-      setState(() {
-        _medicines = [];
-      });
+      if (mounted) {
+        setState(() {
+          _medicines = [];
+        });
+      }
     } finally {
-      setState(() {
-        _isLoadingMedicines = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoadingMedicines = false;
+        });
+      }
     }
   }
 
@@ -734,7 +750,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     try {
       final db = await dbHelper.database;
 
-      // 1. ลบจาก calendar_alerts
+      // 1. ลบจาก calendar_alerts (ใช้ SQLite)
       await db.delete(
         'calendar_alerts',
         where: 'id = ?',
@@ -800,7 +816,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     bool beforeMeal = false;
     bool afterMeal = false;
 
-    // 1. ดึงข้อมูลยาใหม่จาก ID
+    // 1. ดึงข้อมูลยาใหม่จาก ID (จาก SQLite Medicines List)
     if (medicineId != null && medicineId.isNotEmpty) {
       try {
         final med = _medicines.firstWhere(
@@ -860,7 +876,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       // ===== กรณีเปิดใช้ NFC =====
       BuildContext? scanDialogContext;
 
-      showDialog(
+      await showDialog(
         context: context,
         barrierDismissible: false,
         builder: (ctx) {
@@ -898,7 +914,12 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         },
       );
 
+      // ถ้า user ยกเลิก dialog ไปแล้ว จะไม่ต้อง scan
+      // แต่ในโค้ด dialog ด้านบน รอ await ไม่ได้ return ค่า
+      // ต้อง check ว่าจะทำต่อไหม
+
       try {
+        // (Logic การเขียน NFC เหมือนเดิม)
         final availability = await FlutterNfcKit.nfcAvailability;
         if (availability != NFCAvailability.available) {
           throw 'อุปกรณ์นี้ไม่รองรับ NFC หรือยังไม่ได้เปิดใช้งาน';
@@ -1003,10 +1024,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         'et': et,
         'nfc_id': nfcTagId,
         'payload': payloadText,
-        'updated_at': now.toIso8601String(), // ถ้ามี column นี้
+        'updated_at': now.toIso8601String(), // บันทึกเวลาที่อัปเดต
       };
 
-      // Update Database
+      // Update Database Table 'calendar_alerts'
       await db.update(
         'calendar_alerts',
         row,
@@ -1024,8 +1045,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         _isSaving = false;
       });
 
-      // ส่งข้อมูลกลับ (UI เดิมอาจจะรับค่านี้ไปอัปเดต List ในหน้าแม่)
-      // แปลง key เป็น format ที่ UI ใช้อยู่ (CamelCase)
+      // ส่งข้อมูลกลับ (Dashboard จะได้รับค่านี้ไปอัปเดต List)
       final result = {
         'id': reminderId,
         'createby': widget.username,
@@ -1040,9 +1060,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         'medicineName': medicineName,
         'medicineDetail': medicineDetail,
         'medicineBeforeMeal': beforeMeal,
-        'medicineAfterMeal': afterMeal, // แก้ key ให้ตรงกับที่ Dashboard ใช้
-        'beforeMeal': beforeMeal, // ส่งไปเผื่อ
-        'afterMeal': afterMeal, // ส่งไปเผื่อ
+        'medicineAfterMeal': afterMeal,
+        'beforeMeal': beforeMeal,
+        'afterMeal': afterMeal,
         'et': et,
         'nfcId': nfcTagId,
         'payload': payloadText,
