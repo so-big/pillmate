@@ -5,8 +5,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-// ใช้ยิง noti ทดสอบ
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+// ❌ ลบ Import Flutter Local Notifications ทิ้ง
+// import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 // Database Helper
 import 'database_helper.dart';
@@ -14,92 +14,8 @@ import 'database_helper.dart';
 // ✅ เรียกใช้หน้า setting ที่สร้างใหม่
 import 'nortification_setting.dart';
 
-// ตัวแปรเทสต์แจ้งเตือน
-int norti_test = 1; // 1 = ให้ดังตอนกดเทสต์, 0 = ปิด
-
-// ---------- ส่วนสำหรับทดสอบแจ้งเตือน (ปรับปรุงให้รองรับ Windows) ----------
-
-final FlutterLocalNotificationsPlugin _testNotiPlugin =
-    FlutterLocalNotificationsPlugin();
-
-bool _testNotiInitialized = false;
-
-Future<void> _initTestNotifications() async {
-  if (_testNotiInitialized) return;
-
-  // 1. ตั้งค่าสำหรับ Android
-  const AndroidInitializationSettings androidInit =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-
-  // 2. ตั้งค่าสำหรับ Linux/Windows (ใช้ Linux setting เป็นพื้นฐานสำหรับ Desktop บางตัว)
-  const LinuxInitializationSettings linuxInit = LinuxInitializationSettings(
-    defaultActionName: 'Open notification',
-  );
-
-  // 3. ตั้งค่าสำหรับ iOS (ใส่ไว้กัน error หากรันบน mac/ios)
-  const DarwinInitializationSettings darwinInit =
-      DarwinInitializationSettings();
-
-  final InitializationSettings initSettings = InitializationSettings(
-    android: androidInit,
-    linux: linuxInit,
-    iOS: darwinInit,
-    macOS: darwinInit,
-  );
-
-  await _testNotiPlugin.initialize(initSettings);
-
-  // ขอ Permission เฉพาะบน Android (Windows ไม่ต้องขอแบบนี้)
-  if (Platform.isAndroid) {
-    try {
-      final androidImpl = _testNotiPlugin
-          .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin
-          >();
-      await androidImpl?.requestNotificationsPermission();
-    } catch (e) {
-      debugPrint('LeftMenu: requestNotificationsPermission error: $e');
-    }
-  }
-
-  _testNotiInitialized = true;
-}
-
-Future<void> _showTestAlarm() async {
-  try {
-    await _initTestNotifications();
-
-    // ตั้งค่า Android Specific
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-          'pillmate_alarm_test', // channel id
-          'Pillmate Alarm Test',
-          channelDescription: 'ทดสอบเสียงแจ้งเตือนแบบนาฬิกาปลุก',
-          importance: Importance.max,
-          priority: Priority.high,
-          playSound: true,
-          sound: RawResourceAndroidNotificationSound('alarm'),
-          fullScreenIntent: true,
-        );
-
-    // ตั้งค่าทั่วไป (NotificationDetails)
-    const NotificationDetails details = NotificationDetails(
-      android: androidDetails,
-    );
-
-    await _testNotiPlugin.show(
-      9999,
-      'ทดสอบเสียงแจ้งเตือน',
-      'เสียงนี้คือทดสอบแจ้งเตือน (Alarm Mode)',
-      details,
-    );
-  } catch (e) {
-    debugPrint('Show Test Alarm Error: $e');
-    // กันแอปเด้งถ้ารันบน Windows แล้ว Plugin ยังไม่สมบูรณ์
-  }
-}
-
-// -----------------------------------------------------------
+// ❌ ลบตัวแปรเทสต์แจ้งเตือน (norti_test) ทิ้ง
+// ❌ ลบโค้ดฟังก์ชันทั้งหมดที่เกี่ยวข้องกับการทดสอบแจ้งเตือน (_initTestNotifications, _showTestAlarm) ทิ้ง
 
 class LeftMenu extends StatefulWidget {
   final String username;
@@ -363,20 +279,16 @@ class _LeftMenuState extends State<LeftMenu> {
                   },
                 ),
                 const Divider(height: 1),
-                // ✅ เมนูตั้งค่าการแจ้งเตือน
+                // ✅ เมนูตั้งค่าการแจ้งเตือน (ลบโค้ดทดสอบออกแล้ว)
                 ListTile(
                   leading: const Icon(Icons.notifications_active),
                   title: const Text(
                     'ตั้งค่าการแจ้งเตือน',
                     style: TextStyle(color: Colors.black),
                   ),
-                  onTap: () async {
+                  onTap: () {
                     Navigator.pop(context);
-                    // ถ้าเปิด test mode -> ยิง noti
-                    if (norti_test == 1) {
-                      await _showTestAlarm();
-                    }
-                    // ไปหน้า NortificationSettingPage
+                    // ไปหน้า NortificationSettingPage ทันที
                     Navigator.push(
                       context,
                       MaterialPageRoute(

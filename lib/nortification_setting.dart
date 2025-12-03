@@ -4,9 +4,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // สำหรับ rootBundle
+// import 'package:flutter/services.dart'; // ไม่ใช้แล้ว
 import 'package:path_provider/path_provider.dart';
-import 'package:audioplayers/audioplayers.dart'; // ✅ 1. Import audioplayers
+import 'package:audioplayers/audioplayers.dart';
 
 class NortificationSettingPage extends StatefulWidget {
   const NortificationSettingPage({super.key});
@@ -20,10 +20,18 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   bool _isLoading = true;
 
   // --- Audio Player ---
-  final AudioPlayer _audioPlayer = AudioPlayer(); // ✅ 2. ตัวเล่นเสียง
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
-  // --- รายชื่อไฟล์เสียง ---
-  List<String> _availableSounds = [];
+  // ✅ 1. รายชื่อไฟล์เสียง (Hardcode ตามชื่อไฟล์จริง)
+  // ⚠️ สำคัญ: ชื่อตรงนี้ต้องตรงกับชื่อไฟล์ใน assets/sound_norti/ ทุกตัวอักษร
+  final List<String> _availableSounds = const [
+    'assets/sound_norti/01_clock_alarm_normal_30_sec.mp3', // ⬅️ เริ่มที่ 01
+    'assets/sound_norti/02_clock_alarm_normal_1_min.mp3',
+    'assets/sound_norti/03_clock_alarm_normal_1.30_min.mp3',
+    'assets/sound_norti/04_clock_alarm_continue_30_sec.mp3', // *ย้ายขึ้นมา*
+    'assets/sound_norti/05_clock_alarm_continue_1_min.mp3',
+    'assets/sound_norti/06_clock_alarm_continue_1.30_min.mp3',
+  ];
 
   // --- ตัวแปรโหมดเวลา ---
   String? _timeModeSound;
@@ -39,65 +47,37 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   @override
   void initState() {
     super.initState();
+    // ตั้งค่าเริ่มต้น
+    if (_availableSounds.isNotEmpty) {
+      _timeModeSound = _availableSounds.first;
+      _mealModeSound = _availableSounds.first;
+    }
     _initData();
   }
 
   @override
   void dispose() {
-    _audioPlayer.dispose(); // ✅ อย่าลืมคืนค่า memory
+    _audioPlayer.dispose(); // คืนค่า Memory
     super.dispose();
   }
 
   Future<void> _initData() async {
-    await _loadSoundAssets();
+    // โหลดการตั้งค่าอย่างเดียว ไม่มีการ Test Notification
     await _loadSettingsFromJson();
     setState(() {
       _isLoading = false;
     });
   }
 
-  Future<void> _loadSoundAssets() async {
-    try {
-      final manifestContent = await DefaultAssetBundle.of(
-        context,
-      ).loadString('AssetManifest.json');
-      final Map<String, dynamic> manifestMap = json.decode(manifestContent);
-
-      // กรองไฟล์ใน assets/sound_norti/
-      final sounds = manifestMap.keys
-          .where((key) => key.contains('assets/sound_norti/'))
-          .toList();
-
-      setState(() {
-        _availableSounds = sounds;
-        // ถ้ายังไม่มีค่า default ให้เลือกไฟล์แรก
-        if (_availableSounds.isNotEmpty) {
-          if (_timeModeSound == null ||
-              !_availableSounds.contains(_timeModeSound)) {
-            _timeModeSound = _availableSounds.first;
-          }
-          if (_mealModeSound == null ||
-              !_availableSounds.contains(_mealModeSound)) {
-            _mealModeSound = _availableSounds.first;
-          }
-        }
-      });
-
-      debugPrint("Found sounds: $_availableSounds"); // Log ดูว่าเจอไฟล์ไหม
-    } catch (e) {
-      debugPrint('Error loading sound assets: $e');
-    }
-  }
-
   // ✅ ฟังก์ชันเล่นเสียงตัวอย่าง
   Future<void> _playPreview(String? soundPath) async {
     if (soundPath == null) return;
     try {
-      await _audioPlayer.stop(); // หยุดเสียงเก่าก่อน
+      await _audioPlayer.stop();
+      await _audioPlayer.setVolume(1.0); // เร่งเสียงให้สุด
 
-      // AssetSource ของ AudioPlayers ไม่ต้องการคำว่า 'assets/' นำหน้า
-      // เช่น assets/sound_norti/alarm.mp3 -> sound_norti/alarm.mp3
       String cleanPath = soundPath;
+      // ตัด 'assets/' ออกเพราะ AudioPlayers เติมให้เอง
       if (cleanPath.startsWith('assets/')) {
         cleanPath = cleanPath.substring(7);
       }
@@ -117,7 +97,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     await _audioPlayer.stop();
   }
 
-  // ... (ส่วน _loadSettingsFromJson และ _saveSettings เหมือนเดิม ไม่เปลี่ยนแปลง) ...
   Future<void> _loadSettingsFromJson() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -267,15 +246,13 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               setState(() {
                 _timeModeSound = val;
               });
-              // เล่นเสียงทันทีเมื่อเลือก
               _playPreview(val);
             },
           ),
 
           const SizedBox(height: 24),
 
-          // 2. ระยะเวลาการย้ำเตือน (Snooze Duration)
-          // ✅ เพิ่ม Label ตามที่ขอ
+          // 2. ระยะห่างระหว่างการแจ้งเตือน
           const Text(
             'ระยะห่างระหว่างการแจ้งเตือน(นาที)',
             style: TextStyle(
@@ -316,7 +293,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
 
           const SizedBox(height: 24),
 
-          // 3. จำนวนครั้งการย้ำเตือน (Repeat Count)
+          // 3. จำนวนครั้งการย้ำเตือน
           const Text('จำนวนครั้งการย้ำเตือน', style: TextStyle(fontSize: 16)),
           const SizedBox(height: 8),
           Container(
@@ -372,7 +349,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               setState(() {
                 _mealModeSound = val;
               });
-              // เล่นเสียงทันทีเมื่อเลือก
               _playPreview(val);
             },
           ),
@@ -406,7 +382,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     );
   }
 
-  // ✅ แก้ไข Widget เลือกไฟล์เสียง ให้มีปุ่ม Play/Stop
   Widget _buildSoundSelector({
     required String label,
     required String? value,
@@ -428,25 +403,17 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               value: value,
               hint: const Text('เลือกไฟล์เสียง'),
               isExpanded: true,
-              items: _availableSounds.isEmpty
-                  ? [
-                      const DropdownMenuItem(
-                        value: null,
-                        child: Text('ไม่พบไฟล์เสียง (เช็ค pubspec.yaml)'),
-                      ),
-                    ]
-                  : _availableSounds.map((soundPath) {
-                      return DropdownMenuItem(
-                        value: soundPath,
-                        child: Text(_getFileName(soundPath)),
-                      );
-                    }).toList(),
+              items: _availableSounds.map((soundPath) {
+                return DropdownMenuItem(
+                  value: soundPath,
+                  child: Text(_getFileName(soundPath)),
+                );
+              }).toList(),
               onChanged: onChanged,
             ),
           ),
         ),
 
-        // ✅ ปุ่ม Play / Stop ด้านล่าง Dropdown
         const SizedBox(height: 8),
         Row(
           mainAxisAlignment: MainAxisAlignment.start,
@@ -478,7 +445,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     required TimeOfDay time,
     required Function(TimeOfDay) onChanged,
   }) {
-    // ... (เหมือนเดิม) ...
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
