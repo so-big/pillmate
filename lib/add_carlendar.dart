@@ -16,6 +16,8 @@ import 'package:ndef/ndef.dart' as ndef;
 
 // ✅ เรียกใช้ DatabaseHelper
 import 'database_helper.dart';
+// ✅ NEW: Import Notification Service
+import 'nortification_service.dart';
 
 class CarlendarAddSheet extends StatefulWidget {
   final String username;
@@ -620,7 +622,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     return '$hour:$minute';
   }
 
-  // ✅ แก้ไข Logic การบันทึก: เพิ่ม Dialog Box และ Timeout 15 วินาที
+  // ✅ แก้ไข Logic การบันทึก: เพิ่มการเรียกใช้ Notification Service
   Future<void> _handleSave() async {
     if (_isSaving) return;
 
@@ -853,6 +855,9 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
 
       // บันทึกลง SQLite
       await db.insert('calendar_alerts', row);
+
+      // ✅ NEW: Trigger Notification Service ที่นี่
+      scheduleNotificationForNewAlert(row);
 
       if (!mounted) return;
 
