@@ -8,7 +8,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
-// import 'package:path_provider/path_provider.dart'; // ไม่ต้องใช้แล้วเพราะย้ายไป Helper
 import 'database_helper.dart'; // เรียกใช้ไฟล์ Database ที่สร้างใหม่
 
 class CreateAccountPage extends StatefulWidget {
@@ -25,6 +24,18 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
+
+  // ✅ NEW: Controller และตัวแปรสำหรับคำถามกันลืม
+  final TextEditingController _answerController = TextEditingController();
+  String? _selectedQuestion;
+  final List<String> _securityQuestions = const [
+    'ชื่อสัตว์เลี้ยงตัวแรกของคุณ?',
+    'จังหวัดที่คุณเกิด?',
+    'ชื่อกลางของแม่คุณ?',
+    'สีที่คุณชื่นชอบ?',
+    'อาหารจานโปรดของคุณ?',
+  ];
+
   String _message = ''; // ข้อความสถานะ
 
   // รูปโปรไฟล์เบื้องต้นจาก assets
@@ -44,8 +55,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
   // เรียกใช้ Helper Database
   final dbHelper = DatabaseHelper();
-
-  // (ลบ Future<File> get _localFile ทิ้ง เพราะไม่ใช้ JSON แล้ว)
 
   // โหลด asset image → base64
   Future<String> _loadAssetAsBase64(String assetPath) async {
@@ -237,7 +246,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
           ),
         ),
 
-        const SizedBox(height: 12),
+        const SizedBox(height: 10), // ⬇️ ลดระยะห่างตรงนี้
 
         SizedBox(
           width: double.infinity,
@@ -253,6 +262,20 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
   // 2. ฟังก์ชันบันทึกข้อมูลผู้ใช้ (เปลี่ยนจาก JSON File -> SQLite)
   Future<void> _saveUser(String username, String password) async {
+    // ⚠️ NEW: Validation คำถามและคำตอบ
+    if (_selectedQuestion == null) {
+      setState(() {
+        _message = 'Error: กรุณาเลือกคำถามกันลืม';
+      });
+      return;
+    }
+    if (_answerController.text.isEmpty) {
+      setState(() {
+        _message = 'Error: กรุณากรอกคำตอบกันลืม';
+      });
+      return;
+    }
+
     try {
       // ตรวจสอบว่ามี User นี้อยู่แล้วหรือไม่
       final existingUser = await dbHelper.getUser(username);
@@ -264,13 +287,16 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         return;
       }
 
-      // เตรียมข้อมูลลง SQLite (ตามคอลัมน์ที่คุณระบุ: userid, create_at, image_base64)
-      // **หมายเหตุ:** ผมใส่ password ลงไปด้วยเพื่อให้ Login ได้ ถ้าตารางไม่มีให้ลบบรรทัด password ออกครับ
+      // เตรียมข้อมูลลง SQLite (Master User)
       Map<String, dynamic> newUser = {
         'userid': username,
         'password': password,
         'created_at': DateTime.now().toIso8601String(),
         'image_base64': _selectedBase64Image ?? '',
+        'sub_profile': '', // Master User ไม่มี Master (ตัวเอง)
+        'info': '', // Master User ไม่ต้องมี info ตรงนี้
+        'security_question': _selectedQuestion, // ✅ NEW
+        'security_answer': _answerController.text.trim(), // ✅ NEW
       };
 
       // บันทึกลง SQLite
@@ -285,14 +311,23 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         Navigator.pop(context);
       });
     } catch (e) {
+      debugPrint('Error saving data: $e');
+      // ตรวจสอบ Unique constraint failed อีกครั้งหากหลุดมาถึงตรงนี้
+      String displayMsg = 'Error saving data: $e';
+      if (e.toString().contains('UNIQUE constraint failed')) {
+        displayMsg = 'Error: Username already exists!';
+      }
       setState(() {
-        _message = 'Error saving data: $e';
+        _message = displayMsg;
       });
     }
   }
 
   // 3. ฟังก์ชันจัดการการกดปุ่มสมัครสมาชิก
   void _handleCreateAccount() {
+    setState(() {
+      _message = ''; // Clear previous message
+    });
     if (_formKey.currentState!.validate()) {
       if (_passwordController.text != _confirmPasswordController.text) {
         setState(() {
@@ -300,9 +335,18 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         });
         return;
       }
-      // บันทึกข้อมูล
+      // บันทึกข้อมูล (จะมี Validation เพิ่มเติมใน _saveUser)
       _saveUser(_usernameController.text, _passwordController.text);
     }
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    _answerController.dispose(); // ✅ NEW: dispose controller
+    super.dispose();
   }
 
   @override
@@ -338,12 +382,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(height: 20),
-
+                  const SizedBox(height: 16), // ลดจาก 20
                   // 🔹 ส่วนเลือกรูปโปรไฟล์
                   _buildAvatarSelector(),
-                  const SizedBox(height: 20),
-
+                  const SizedBox(height: 16), // ลดจาก 20
                   // 1. Username Field
                   TextFormField(
                     style: const TextStyle(
@@ -361,8 +403,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 20),
-
+                  const SizedBox(height: 16), // ลดจาก 20
                   // 2. Password Field
                   TextFormField(
                     style: const TextStyle(
@@ -381,8 +422,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 20),
-
+                  const SizedBox(height: 16), // ลดจาก 20
                   // 3. Confirm Password Field
                   TextFormField(
                     style: const TextStyle(
@@ -404,8 +444,52 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 16), // ลดจาก 20
+                  // ✅ NEW: 4. คำถามกันลืม (Dropdown) - ใช้วิธี DropdownButtonFormField
+                  DropdownButtonFormField<String>(
+                    value: _selectedQuestion,
+                    hint: const Text('เลือกคำถามกันลืม *'),
+                    decoration: const InputDecoration(
+                      labelText: 'คำถามกันลืม *',
+                      prefixIcon: Icon(Icons.help_outline),
+                    ),
+                    items: _securityQuestions.map((String question) {
+                      return DropdownMenuItem<String>(
+                        value: question,
+                        child: Text(question),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        _selectedQuestion = newValue;
+                      });
+                    },
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please select a security question';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16), // ลดจาก 20
+                  // ✅ NEW: 5. คำตอบกันลืม (TextField)
+                  TextFormField(
+                    style: const TextStyle(color: Colors.black),
+                    controller: _answerController,
+                    decoration: const InputDecoration(
+                      labelText: 'คำตอบกันลืม *',
+                      prefixIcon: Icon(Icons.security),
+                    ),
+                    validator: (value) {
+                      if (_selectedQuestion != null &&
+                          (value == null || value.isEmpty)) {
+                        return 'Please enter an answer for the security question';
+                      }
+                      return null;
+                    },
+                  ),
 
+                  const SizedBox(height: 24), // ลดจาก 40
                   // Create Account Button
                   ElevatedButton(
                     onPressed: _handleCreateAccount,
@@ -425,8 +509,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-
+                  const SizedBox(height: 10), // ลดจาก 20
                   // Status Message
                   Text(
                     _message,
@@ -439,20 +522,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     ),
                   ),
 
-                  const SizedBox(height: 20),
-
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                    },
-                    child: Text(
-                      'Back to Login',
-                      style: TextStyle(
-                        color: Colors.blue[700],
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
+                  // ✅ ลบ TextButton 'Back to Login' ออก
                 ],
               ),
             ),

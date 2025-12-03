@@ -25,6 +25,10 @@ class _EditAccountPageState extends State<EditAccountPage> {
   final TextEditingController _confirmPasswordController =
       TextEditingController();
 
+  // ✅ NEW: Controller สำหรับคำตอบกันลืม
+  final TextEditingController _securityAnswerController =
+      TextEditingController();
+
   bool _isSaving = false;
   String? _errorMessage;
 
@@ -41,6 +45,16 @@ class _EditAccountPageState extends State<EditAccountPage> {
   ];
   int? _selectedAvatarIndex;
 
+  // ✅ NEW: รายการคำถามกันลืม (ชุดเดียวกับ Create Account)
+  final List<String> _securityQuestions = const [
+    'ชื่อสัตว์เลี้ยงตัวแรกของคุณ?',
+    'จังหวัดที่คุณเกิด?',
+    'ชื่อกลางของแม่คุณ?',
+    'สีที่คุณชื่นชอบ?',
+    'อาหารจานโปรดของคุณ?',
+  ];
+  String? _selectedSecurityQuestion; // เก็บคำถามที่เลือก
+
   final ImagePicker _picker = ImagePicker();
 
   // 2. ประกาศตัวแปร dbHelper
@@ -52,7 +66,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     _loadAccount();
   }
 
-  // 3. แก้ไขการโหลดข้อมูลจาก SQLite
+  // 3. แก้ไขการโหลดข้อมูลจาก SQLite (เพิ่มการโหลด Security info)
   Future<void> _loadAccount() async {
     try {
       final user = await dbHelper.getUser(widget.username);
@@ -61,9 +75,21 @@ class _EditAccountPageState extends State<EditAccountPage> {
         setState(() {
           // ต้องสร้าง copy map เพื่อให้แน่ใจว่าแก้ไขได้ (Mutable)
           _accountUser = Map<String, dynamic>.from(user);
-          // ✅ แก้ไข: ใช้ key 'image_base64' ให้ตรงกับ DB
+          // ใช้ key 'image_base64' ให้ตรงกับ DB
           _selectedBase64Image = user['image_base64']?.toString();
           _selectedAvatarIndex = null;
+
+          // ✅ NEW: โหลดคำถามและคำตอบเดิม
+          if (user['security_question'] != null) {
+            _selectedSecurityQuestion = user['security_question'].toString();
+            // เช็คว่าคำถามเดิมอยู่ในลิสต์ไหม ถ้าไม่อยู่ (เช่น เป็นคำถามเก่า) ให้ reset หรือ handle ตามเหมาะสม
+            if (!_securityQuestions.contains(_selectedSecurityQuestion)) {
+              _selectedSecurityQuestion = null;
+            }
+          }
+          if (user['security_answer'] != null) {
+            _securityAnswerController.text = user['security_answer'].toString();
+          }
         });
       } else {
         debugPrint('User not found in DB');
@@ -228,6 +254,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     final newPwd = _newPasswordController.text.trim();
     final confirmPwd = _confirmPasswordController.text.trim();
 
+    // Validation รหัสผ่านใหม่ (ถ้ามีการกรอก)
     if (newPwd.isNotEmpty && newPwd.length < 6) {
       setState(() {
         _errorMessage = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร';
@@ -242,10 +269,25 @@ class _EditAccountPageState extends State<EditAccountPage> {
       return;
     }
 
+    // Validation คำถามกันลืม (ควรต้องมีข้อมูล)
+    if (_selectedSecurityQuestion == null) {
+      setState(() {
+        _errorMessage = 'กรุณาเลือกคำถามกันลืม';
+      });
+      return;
+    }
+    if (_securityAnswerController.text.trim().isEmpty) {
+      setState(() {
+        _errorMessage = 'กรุณากรอกคำตอบกันลืม';
+      });
+      return;
+    }
+
     setState(() {
       _errorMessage = null;
     });
 
+    // --- Dialog ถามรหัสผ่านเดิม ---
     final TextEditingController pwdController = TextEditingController();
     String? errorText;
 
@@ -331,7 +373,8 @@ class _EditAccountPageState extends State<EditAccountPage> {
                     }
 
                     if (mounted) {
-                      Navigator.pop(ctx);
+                      Navigator.pop(ctx); // ปิด Dialog
+                      // ทำการบันทึก
                       await _applyAccountChanges(
                         newPwd.isEmpty ? null : newPwd,
                       );
@@ -351,7 +394,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     );
   }
 
-  // 5. แก้ไขการบันทึกข้อมูลลง SQLite
+  // 5. แก้ไขการบันทึกข้อมูลลง SQLite (เพิ่ม security question/answer)
   Future<void> _applyAccountChanges(String? newPassword) async {
     setState(() {
       _isSaving = true;
@@ -372,11 +415,15 @@ class _EditAccountPageState extends State<EditAccountPage> {
         updatedUser['password'] = newPassword;
       }
 
-      // ✅ แก้ไข: อัปเดตรูปภาพโดยใช้ key 'image_base64'
+      // อัปเดตรูปภาพโดยใช้ key 'image_base64'
       updatedUser['image_base64'] =
           _selectedBase64Image ?? updatedUser['image_base64'] ?? '';
 
-      // ลบ key 'image' เก่าออกถ้ามี (เพื่อความสะอาด)
+      // ✅ NEW: อัปเดตคำถามและคำตอบกันลืม
+      updatedUser['security_question'] = _selectedSecurityQuestion;
+      updatedUser['security_answer'] = _securityAnswerController.text.trim();
+
+      // ลบ key 'image' เก่าออกถ้ามี
       updatedUser.remove('image');
 
       // เรียกใช้ updateUser ใน DatabaseHelper
@@ -407,12 +454,12 @@ class _EditAccountPageState extends State<EditAccountPage> {
   void dispose() {
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
+    _securityAnswerController.dispose(); // ✅ NEW: dispose answer controller
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // โค้ด UI เหมือนเดิมทั้งหมด
     final usernameText = widget.username;
 
     return Scaffold(
@@ -487,6 +534,51 @@ class _EditAccountPageState extends State<EditAccountPage> {
                   onPressed: _pickFromGallery,
                   icon: const Icon(Icons.photo_library),
                   label: const Text('เลือกรูปจากโทรศัพท์'),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // ✅ NEW: ส่วนแก้ไขคำถามกันลืม
+              const Text(
+                'ตั้งค่าความปลอดภัย',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              DropdownButtonFormField<String>(
+                value: _selectedSecurityQuestion,
+                style: const TextStyle(color: Colors.black),
+                decoration: const InputDecoration(
+                  labelText: 'คำถามกันลืม',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.help_outline),
+                ),
+                items: _securityQuestions.map((String question) {
+                  return DropdownMenuItem<String>(
+                    value: question,
+                    child: Text(question),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    _selectedSecurityQuestion = newValue;
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+
+              TextField(
+                controller: _securityAnswerController,
+                style: const TextStyle(color: Colors.black),
+                decoration: const InputDecoration(
+                  labelText: 'คำตอบกันลืม',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.security),
                 ),
               ),
 
