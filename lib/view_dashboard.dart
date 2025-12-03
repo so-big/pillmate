@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'nortification_setup.dart';
 import 'view_carlendar.dart';
 import 'add_carlendar.dart';
-import 'edit_carlendar.dart';
+import 'edit_carlendar.dart'; // ✅ ต้องมั่นใจว่าในไฟล์นี้มี class CarlendarEditSheet
 import 'create_profile.dart';
 import 'manage_profile.dart';
 import 'view_menu.dart';
@@ -357,9 +357,39 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  // ✅ แก้ไข: เรียก CarlendarEditSheet ขึ้นมาในแบบ DraggableScrollableSheet
   Future<void> _openEditReminderSheet(Map<String, dynamic> reminder) async {
-    // (ยังรอไฟล์ edit_carlendar)
-    debugPrint("Open Edit Reminder: Not implemented yet fully");
+    final result = await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, // ทำให้แสดงผลเต็มจอได้
+      useSafeArea: true,
+      enableDrag: true,
+      backgroundColor:
+          Colors.transparent, // โปร่งใสเพื่อให้เห็นมุมโค้งของ Sheet
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.5,
+          minChildSize: 0.25,
+          maxChildSize: 1.0,
+          expand: true,
+          builder: (ctx, scrollController) {
+            // สมมติชื่อคลาสใน edit_carlendar.dart คือ CarlendarEditSheet
+            // และรับ parameter 'reminder' หรือ 'data'
+            return CarlendarEditSheet(
+              username: widget.username,
+              reminder: reminder, // ส่งข้อมูลที่ต้องการแก้ไขเข้าไป
+              scrollController: scrollController,
+            );
+          },
+        );
+      },
+    );
+
+    // หากมีการบันทึกและปิดหน้า (result != null) ให้โหลดข้อมูลใหม่
+    if (result != null) {
+      await _loadReminders();
+      await NortificationSetup.run(context: context, username: widget.username);
+    }
   }
 
   // ---------- PASSWORD VERIFY / CLEAR TAKEN ----------
@@ -1013,7 +1043,7 @@ class _DashboardPageState extends State<DashboardPage> {
           // ไม่ return แล้ว ถ้า isTaken เป็น true เพื่อให้เข้าสู่ Timer Logic
 
           // เริ่มจับเวลา 2 วินาที
-          _manualHoldTimer = Timer(const Duration(seconds: 1), () async {
+          _manualHoldTimer = Timer(const Duration(seconds: 2), () async {
             if (isTaken) {
               // ----------------------------------------------------------
               // ✨ NEW: ถ้ากินแล้ว ให้เรียกฟังก์ชันยกเลิก (ต้องใส่ Password)
@@ -1141,7 +1171,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          isTaken ? 'กินแล้ว' : 'ยังไม่ได้กิน',
+                          isTaken ? 'กินแล้ว (ยืนยันด้วย NFC)' : 'ยังไม่ได้กิน',
                           style: TextStyle(
                             fontSize: 13,
                             color: isTaken

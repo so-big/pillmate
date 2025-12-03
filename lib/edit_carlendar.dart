@@ -2,7 +2,8 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui'; // <--- เพิ่ม import นี้เพื่อใช้ PointerDeviceKind
+import 'dart:async'; // เพิ่มเพื่อใช้ Timer
+import 'dart:ui'; // เพื่อใช้ PointerDeviceKind
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -10,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'create_profile.dart';
 import 'add_medicine.dart';
+import 'database_helper.dart'; // ✅ เรียกใช้ DatabaseHelper
 
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:ndef/ndef.dart' as ndef;
@@ -49,40 +51,15 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
   bool _notifyByTime = true;
   bool _notifyByMeal = false;
 
-  // เดิม int _intervalHours = 4;
   int _intervalMinutes = 4 * 60;
 
   bool _isSaving = false;
 
-  Future<File> get _profilesFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/profiles.json');
-  }
+  // ✅ ตัวแปรเก็บสถานะ NFC จาก json
+  bool _isNfcEnabled = false;
 
-  Future<File> get _usersFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/user.json');
-  }
-
-  Future<File> get _pillProfileFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/pillprofile.json');
-  }
-
-  Future<File> get _calendarFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/carlendar.json');
-  }
-
-  Future<File> get _remindersFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/reminders.json');
-  }
-
-  Future<File> get _eatedFile async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/eated.json');
-  }
+  // ✅ Database Helper
+  final dbHelper = DatabaseHelper();
 
   @override
   void initState() {
@@ -110,10 +87,12 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     // แปลง interval จากข้อมูลเดิม
     int intervalMinutes =
         int.tryParse(r['intervalMinutes']?.toString() ?? '') ?? 0;
+    // fallback ถ้าไม่มี minutes ลองดู hours (เผื่อข้อมูลเก่า)
     if (intervalMinutes <= 0) {
       final hours = int.tryParse(r['intervalHours']?.toString() ?? '') ?? 4;
       intervalMinutes = hours * 60;
     }
+    // ถ้ายัง 0 อีก ให้ default 4 ชม.
     if (intervalMinutes <= 0) {
       intervalMinutes = 4 * 60;
     }
@@ -126,9 +105,34 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
     _loadProfiles();
     _loadMedicines();
+    _loadNfcStatus(); // ✅ โหลดสถานะ NFC
   }
 
-  // ---------- โหลดข้อมูลโปรไฟล์ / ยา ----------
+  // ✅ ฟังก์ชันโหลดสถานะ NFC จาก appstatus.json
+  Future<void> _loadNfcStatus() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/appstatus.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          final data = jsonDecode(content);
+          if (data is Map) {
+            setState(() {
+              _isNfcEnabled = data['nfc_enabled'] ?? false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('CarlendarEdit: error loading NFC status: $e');
+      setState(() {
+        _isNfcEnabled = false;
+      });
+    }
+  }
+
+  // ---------- โหลดข้อมูลโปรไฟล์ / ยา จาก SQLite ----------
 
   Future<void> _loadProfiles() async {
     setState(() {
@@ -136,63 +140,35 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     });
 
     try {
-      String? accountImage;
-      try {
-        final usersFile = await _usersFile;
-        if (await usersFile.exists()) {
-          final content = await usersFile.readAsString();
-          if (content.trim().isNotEmpty) {
-            final list = jsonDecode(content);
-            if (list is List) {
-              for (final u in list) {
-                if (u is Map || u is Map<String, dynamic>) {
-                  final map = Map<String, dynamic>.from(u);
-                  if (map['userid'] == widget.username) {
-                    final img = map['image'];
-                    if (img != null && img.toString().isNotEmpty) {
-                      accountImage = img.toString();
-                    }
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('CarlendarEdit: error loading user image: $e');
-      }
-
-      final file = await _profilesFile;
-      List<dynamic> raw = [];
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          raw = jsonDecode(content);
-        }
-      }
-
-      final filtered = raw
-          .where((p) {
-            if (p is Map<String, dynamic>) {
-              return p['createby'] == widget.username;
-            }
-            if (p is Map) return p['createby'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p));
-
+      final db = await dbHelper.database;
       final profiles = <Map<String, dynamic>>[];
 
-      profiles.add({
-        'name': widget.username,
-        'createby': widget.username,
-        'image': accountImage,
-      });
+      // 1. Master User
+      final masterUser = await dbHelper.getUser(widget.username);
+      if (masterUser != null) {
+        profiles.add({
+          'name': masterUser['userid'],
+          'createby': widget.username,
+          'image': masterUser['image_base64'],
+        });
+      }
 
-      profiles.addAll(filtered);
+      // 2. Sub-profiles
+      final List<Map<String, dynamic>> subs = await db.query(
+        'users',
+        where: 'sub_profile = ?',
+        whereArgs: [widget.username],
+      );
 
+      for (var s in subs) {
+        profiles.add({
+          'name': s['userid'],
+          'createby': widget.username,
+          'image': s['image_base64'],
+        });
+      }
+
+      // ตรวจสอบ selection
       String? selected = _selectedProfileName;
       if (selected == null ||
           profiles.every((p) => p['name']?.toString() != selected)) {
@@ -206,7 +182,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         _selectedProfileName = selected;
       });
     } catch (e) {
-      debugPrint('CarlendarEdit: error loading profiles: $e');
+      debugPrint('CarlendarEdit: error loading profiles DB: $e');
       setState(() {
         _profiles = [];
       });
@@ -223,43 +199,31 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     });
 
     try {
-      final file = await _pillProfileFile;
-      List<dynamic> raw = [];
+      final db = await dbHelper.database;
+      final List<Map<String, dynamic>> result = await db.query(
+        'medicines',
+        where: 'createby = ?',
+        whereArgs: [widget.username],
+      );
 
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          raw = jsonDecode(content);
-        }
-      }
-
-      final filtered = raw
-          .where((m) {
-            if (m is Map<String, dynamic>) {
-              return m['createby'] == widget.username;
-            }
-            if (m is Map) return m['createby'] == widget.username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((m) => Map<String, dynamic>.from(m))
-          .toList();
+      final medList = List<Map<String, dynamic>>.from(result);
 
       String? selected = _selectedMedicineId;
       if (selected == null ||
-          filtered.every((m) => m['id']?.toString() != selected)) {
-        if (filtered.isNotEmpty) {
-          selected = filtered.first['id']?.toString();
+          medList.every((m) => m['id']?.toString() != selected)) {
+        if (medList.isNotEmpty) {
+          selected = medList.first['id']?.toString();
         } else {
           selected = null;
         }
       }
 
       setState(() {
-        _medicines = filtered;
+        _medicines = medList;
         _selectedMedicineId = selected;
       });
     } catch (e) {
-      debugPrint('CarlendarEdit: error loading medicines: $e');
+      debugPrint('CarlendarEdit: error loading medicines DB: $e');
       setState(() {
         _medicines = [];
       });
@@ -273,17 +237,20 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
   // ---------- UI helper ----------
 
   Widget _buildProfileAvatar(dynamic imageData) {
-    if (imageData == null || imageData.toString().isNotEmpty == false) {
+    if (imageData == null || imageData.toString().isEmpty) {
       return const CircleAvatar(
         radius: 16,
         child: Icon(Icons.person, size: 18),
       );
     }
     try {
-      final bytes = base64Decode(imageData.toString());
+      final str = imageData.toString();
+      if (str.startsWith('assets/')) {
+        return CircleAvatar(radius: 16, backgroundImage: AssetImage(str));
+      }
+      final bytes = base64Decode(str);
       return CircleAvatar(radius: 16, backgroundImage: MemoryImage(bytes));
     } catch (e) {
-      debugPrint('CarlendarEdit: decode image fail: $e');
       return const CircleAvatar(
         radius: 16,
         child: Icon(Icons.person, size: 18),
@@ -298,9 +265,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         child: Icon(Icons.medication, size: 18),
       );
     }
-
     final str = imageData.toString();
-
     if (str.startsWith('assets/')) {
       return CircleAvatar(
         radius: 16,
@@ -308,12 +273,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         child: ClipOval(child: Image.asset(str, fit: BoxFit.contain)),
       );
     }
-
     try {
       final bytes = base64Decode(str);
       return CircleAvatar(radius: 16, backgroundImage: MemoryImage(bytes));
     } catch (e) {
-      debugPrint('CarlendarEdit: decode medicine image fail: $e');
       return const CircleAvatar(
         radius: 16,
         child: Icon(Icons.medication, size: 18),
@@ -339,6 +302,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
     await _loadMedicines();
 
+    // ถ้ามีการส่ง id กลับมา (เพิ่มยาสำเร็จ) ให้เลือกตัวนั้นเลย
     if (result is Map && result['id'] != null) {
       setState(() {
         _selectedMedicineId = result['id'].toString();
@@ -561,14 +525,12 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     );
   }
 
-  // ฟอร์แมตช่วงเวลาเป็น HH.MM
   String _formatIntervalLabel() {
     final h = _intervalMinutes ~/ 60;
     final m = _intervalMinutes % 60;
     return '${h.toString().padLeft(2, '0')}.${m.toString().padLeft(2, '0')}';
   }
 
-  // เลือกช่วงเวลาแบบชั่วโมง.นาที (0–24 ชม.)
   Future<void> _pickIntervalMinutes() async {
     int tempHour = _intervalMinutes ~/ 60;
     int tempMinute = _intervalMinutes % 60;
@@ -720,13 +682,12 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     return '$hour:$minute';
   }
 
-  // ---------- DELETE: ลบการแจ้งเตือนนี้จากทุกไฟล์ที่เกี่ยวข้อง ----------
+  // ---------- DELETE: ลบจาก SQLite ----------
 
   Future<void> _handleDelete() async {
     if (_isSaving) return;
 
-    final original = widget.reminder;
-    final reminderId = original['id']?.toString();
+    final reminderId = widget.reminder['id']?.toString();
 
     if (reminderId == null || reminderId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -746,7 +707,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
           ),
           content: const Text(
             'การลบนี้จะลบข้อมูลการแจ้งเตือนของยานี้ออกจากระบบทั้งหมด\n'
-            'หากต้องการใช้งานอีกครั้ง คุณต้องสร้างการแจ้งเตือนใหม่',
+            'รวมถึงประวัติการกินยาที่เกี่ยวข้องด้วย',
             style: TextStyle(color: Colors.black87),
           ),
           actions: [
@@ -771,122 +732,42 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     });
 
     try {
-      // 1) ลบจาก carlendar.json
-      final calFile = await _calendarFile;
-      List<dynamic> calList = [];
+      final db = await dbHelper.database;
 
-      if (await calFile.exists()) {
-        final content = await calFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          try {
-            final decoded = jsonDecode(content);
-            if (decoded is List) {
-              calList = decoded;
-            }
-          } catch (e) {
-            debugPrint(
-              'CarlendarEdit: calendar JSON decode error on delete: $e',
-            );
-          }
-        }
-      }
+      // 1. ลบจาก calendar_alerts
+      await db.delete(
+        'calendar_alerts',
+        where: 'id = ?',
+        whereArgs: [reminderId],
+      );
 
-      calList = calList.where((item) {
-        if (item is Map || item is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(item);
-          final id = map['id']?.toString();
-          final createby = map['createby']?.toString();
-          if (id == reminderId && createby == widget.username) {
-            return false; // ลบ
-          }
-        }
-        return true;
-      }).toList();
-
-      await calFile.writeAsString(jsonEncode(calList), flush: true);
-
-      // 2) ลบจาก reminders.json
-      final remindersFile = await _remindersFile;
-      List<dynamic> remList = [];
-      if (await remindersFile.exists()) {
-        final content = await remindersFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          try {
-            final decoded = jsonDecode(content);
-            if (decoded is List) {
-              remList = decoded;
-            }
-          } catch (e) {
-            debugPrint(
-              'CarlendarEdit: reminders JSON decode error on delete: $e',
-            );
-          }
-        }
-      }
-
-      remList = remList.where((item) {
-        if (item is Map || item is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(item);
-          final id = map['id']?.toString();
-          final createby = map['createby']?.toString();
-          if (id == reminderId && createby == widget.username) {
-            return false; // ลบ
-          }
-        }
-        return true;
-      }).toList();
-
-      await remindersFile.writeAsString(jsonEncode(remList), flush: true);
-
-      // 3) ลบจาก eated.json (log การกินของ reminder นี้)
-      final eatedFile = await _eatedFile;
-      List<dynamic> eatedList = [];
-      if (await eatedFile.exists()) {
-        final content = await eatedFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          try {
-            final decoded = jsonDecode(content);
-            if (decoded is List) {
-              eatedList = decoded;
-            }
-          } catch (e) {
-            debugPrint('CarlendarEdit: eated JSON decode error on delete: $e');
-          }
-        }
-      }
-
-      eatedList = eatedList.where((item) {
-        if (item is Map || item is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(item);
-          final uid = map['userid']?.toString();
-          final rid = map['reminderId']?.toString();
-          if (uid == widget.username && rid == reminderId) {
-            return false; // ลบ
-          }
-        }
-        return true;
-      }).toList();
-
-      await eatedFile.writeAsString(jsonEncode(eatedList), flush: true);
+      // 2. ลบประวัติการกินยาที่เกี่ยวข้องออกจาก taken_doses (Cascade Logic)
+      await db.delete(
+        'taken_doses',
+        where: 'reminder_id = ?',
+        whereArgs: [reminderId],
+      );
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ลบการแจ้งเตือนนี้จากระบบเรียบร้อยแล้ว')),
+        const SnackBar(
+          content: Text('ลบการแจ้งเตือนและข้อมูลที่เกี่ยวข้องเรียบร้อยแล้ว'),
+        ),
       );
 
       setState(() {
         _isSaving = false;
       });
 
-      // ส่งผลลัพธ์กลับไปให้หน้า Dashboard รู้ว่า "ลบแล้ว"
+      // ส่งผลลัพธ์กลับไป
       Navigator.pop(context, {
         'id': reminderId,
         'createby': widget.username,
         'deleted': true,
       });
     } catch (e) {
-      debugPrint('CarlendarEdit: delete error: $e');
+      debugPrint('CarlendarEdit: delete DB error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -897,7 +778,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     }
   }
 
-  // ---------- SAVE: เขียนลง NFC + อัปเดตไฟล์ + ส่งข้อมูลกลับ ----------
+  // ---------- SAVE: บันทึกลง SQLite (+ NFC ถ้าเปิด) ----------
 
   Future<void> _handleSave() async {
     if (_isSaving) return;
@@ -919,7 +800,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     bool beforeMeal = false;
     bool afterMeal = false;
 
-    // ลองดึงจากรายการยา (pillprofile)
+    // 1. ดึงข้อมูลยาใหม่จาก ID
     if (medicineId != null && medicineId.isNotEmpty) {
       try {
         final med = _medicines.firstWhere(
@@ -927,24 +808,25 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         );
         medicineName = med['name']?.toString() ?? '';
         medicineDetail = med['detail']?.toString() ?? '';
-        beforeMeal = med['beforeMeal'] == true;
-        afterMeal = med['afterMeal'] == true;
+        beforeMeal = (med['before_meal'] == 1);
+        afterMeal = (med['after_meal'] == 1);
       } catch (_) {}
     }
 
-    // ถ้าหาใน pillprofile ไม่ได้ ใช้ค่าจาก reminder เดิม
+    // 2. ถ้าหาไม่เจอ ใช้ค่าเดิม
     if (medicineName.isEmpty) {
       medicineName = original['medicineName']?.toString() ?? '';
     }
     if (medicineDetail.isEmpty) {
       medicineDetail = original['medicineDetail']?.toString() ?? '';
     }
+    // ถ้าไม่เคยโหลด med ใหม่เลย ใช้ค่า meal เดิม
     if (!beforeMeal && !afterMeal) {
-      beforeMeal = original['medicineBeforeMeal'] == true;
-      afterMeal = original['medicineAfterMeal'] == true;
+      beforeMeal = original['beforeMeal'] == true;
+      afterMeal = original['afterMeal'] == true;
     }
 
-    // กันเน่าทั้งหมด
+    // กันเน่า
     if (!beforeMeal && !afterMeal) {
       beforeMeal = true;
       afterMeal = false;
@@ -971,31 +853,49 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       _isSaving = true;
     });
 
-    // --- ส่วนที่เพิ่ม/แก้ไข เพื่อรองรับ PC Mode ---
-    final isDesktop =
-        Platform.isWindows || Platform.isMacOS || Platform.isLinux;
     String? nfcTagId;
-    bool nfcWriteSuccess = false;
 
-    if (isDesktop) {
-      // โหมด PC: ข้าม NFC
-      debugPrint(
-        'CarlendarEdit: Running on PC/Desktop. Skipping NFC operation.',
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('บันทึกแก้ไขในโหมด PC (ไม่ใช้ NFC)')),
-      );
-      nfcWriteSuccess = true;
-      // ใช้ ID เดิม หรือ สร้าง dummy
-      nfcTagId =
-          original['nfcId']?.toString() ??
-          'PC-MODE-${DateTime.now().millisecondsSinceEpoch}';
-    } else {
-      // โหมด Mobile (NFC)
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('กรุณาแตะแท็ก NFC เพื่อบันทึกการแก้ไขการแจ้งเตือน'),
-        ),
+    // --- ส่วนการจัดการ NFC ---
+    if (_isNfcEnabled) {
+      // ===== กรณีเปิดใช้ NFC =====
+      BuildContext? scanDialogContext;
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          scanDialogContext = ctx;
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.nfc, size: 50, color: Colors.black),
+                SizedBox(height: 16),
+                Text(
+                  'กรุณาแตะ tag nfc ที่เซ็นเซอร์เพื่อบันทึกค่าแก้ไข',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                },
+                child: const Text(
+                  'ยกเลิก',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          );
+        },
       );
 
       try {
@@ -1010,8 +910,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
           iosAlertMessage: 'แตะแท็กที่ต้องการ',
         );
 
-        debugPrint('CarlendarEdit: NFC tag = $tag');
-
         if (tag.ndefWritable != true) {
           throw 'แท็กนี้ไม่สามารถเขียน NDEF ได้';
         }
@@ -1020,119 +918,101 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         await FlutterNfcKit.writeNDEFRecords([record]);
 
         nfcTagId = tag.id;
-        nfcWriteSuccess = true;
 
         try {
           await FlutterNfcKit.finish(iosAlertMessage: 'สำเร็จ');
         } catch (_) {}
+
+        if (scanDialogContext != null && scanDialogContext!.mounted) {
+          Navigator.pop(scanDialogContext!);
+          scanDialogContext = null;
+        }
       } catch (e) {
-        debugPrint('CarlendarEdit: NFC/save error: $e');
+        debugPrint('CarlendarEdit: NFC write error: $e');
+        try {
+          await FlutterNfcKit.finish(iosErrorMessage: 'ล้มเหลว');
+        } catch (_) {}
+
+        if (scanDialogContext != null && scanDialogContext!.mounted) {
+          Navigator.pop(scanDialogContext!);
+          scanDialogContext = null;
+        }
+
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('ไม่สามารถบันทึกบน NFC ได้: $e')),
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: Colors.white,
+              title: const Text(
+                'ผิดพลาด',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: const Text(
+                'การบันทึกข้อมูลลง NFC ไม่สำเร็จ\nกรุณาตรวจสอบระบบ sensor และ tag nfc',
+                style: TextStyle(color: Colors.black),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(
+                    'ตกลง',
+                    style: TextStyle(color: Colors.teal),
+                  ),
+                ),
+              ],
+            ),
           );
           setState(() {
             _isSaving = false;
           });
+          return;
         }
-        try {
-          await FlutterNfcKit.finish(iosErrorMessage: 'ล้มเหลว');
-        } catch (_) {}
-        return; // ออกถ้า NFC พังในโหมดมือถือ
       }
+    } else {
+      // ===== กรณีปิด NFC (PC Mode หรือ User ปิด) =====
+      debugPrint('CarlendarEdit: NFC is disabled. Saving DB only.');
+      nfcTagId =
+          original['nfcId']?.toString() ??
+          'MANUAL-EDIT-${DateTime.now().millisecondsSinceEpoch}';
     }
 
-    // *** ส่วนการบันทึกลงไฟล์ JSON ***
-    if (!nfcWriteSuccess) {
-      setState(() {
-        _isSaving = false;
-      });
-      return;
-    }
-
+    // *** ส่วนการบันทึกลง SQLite ***
     try {
-      // อัปเดตไฟล์ carlendar.json
-      final calFile = await _calendarFile;
-      List<dynamic> calList = [];
-      if (await calFile.exists()) {
-        final content = await calFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          try {
-            final decoded = jsonDecode(content);
-            if (decoded is List) calList = decoded;
-          } catch (e) {
-            debugPrint('CarlendarEdit: calendar JSON decode error: $e');
-          }
-        }
-      }
-
       final now = DateTime.now();
       final reminderId =
           original['id']?.toString() ?? now.millisecondsSinceEpoch.toString();
+      final db = await dbHelper.database;
 
-      bool updated = false;
+      final Map<String, dynamic> row = {
+        'createby': widget.username,
+        'profile_name': profileName,
+        'medicine_id': medicineId,
+        'medicine_name': medicineName,
+        'medicine_detail': medicineDetail,
+        'medicine_before_meal': beforeMeal ? 1 : 0,
+        'medicine_after_meal': afterMeal ? 1 : 0,
+        'start_date_time': _startDateTime.toIso8601String(),
+        'end_date_time': _endDateTime.toIso8601String(),
+        'notify_by_time': _notifyByTime ? 1 : 0,
+        'notify_by_meal': _notifyByMeal ? 1 : 0,
+        'interval_minutes': _intervalMinutes,
+        'interval_hours': (_intervalMinutes / 60).round(),
+        'et': et,
+        'nfc_id': nfcTagId,
+        'payload': payloadText,
+        'updated_at': now.toIso8601String(), // ถ้ามี column นี้
+      };
 
-      for (int i = 0; i < calList.length; i++) {
-        final item = calList[i];
-        if (item is Map || item is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(item);
-          final id = map['id']?.toString();
-          final createby = map['createby']?.toString();
-
-          if (id == reminderId && createby == widget.username) {
-            final entry = Map<String, dynamic>.from(map);
-            entry['profileName'] = profileName;
-            entry['medicineId'] = medicineId;
-            entry['medicineName'] = medicineName;
-            entry['medicineDetail'] = medicineDetail;
-            entry['medicineBeforeMeal'] = beforeMeal;
-            entry['medicineAfterMeal'] = afterMeal;
-
-            entry['startDateTime'] = _startDateTime.toIso8601String();
-            entry['endDateTime'] = _endDateTime.toIso8601String();
-            entry['notifyByTime'] = _notifyByTime;
-            entry['notifyByMeal'] = _notifyByMeal;
-            entry['intervalMinutes'] = _intervalMinutes;
-            entry['intervalHours'] = (_intervalMinutes / 60).round();
-            entry['et'] = et;
-
-            entry['nfcId'] = nfcTagId;
-            entry['payload'] = payloadText;
-
-            entry['updatedAt'] = now.toIso8601String();
-
-            calList[i] = entry;
-            updated = true;
-            break;
-          }
-        }
-      }
-
-      if (!updated) {
-        final entry = {
-          'id': reminderId,
-          'createby': widget.username,
-          'profileName': profileName,
-          'medicineId': medicineId,
-          'medicineName': medicineName,
-          'medicineDetail': medicineDetail,
-          'medicineBeforeMeal': beforeMeal,
-          'medicineAfterMeal': afterMeal,
-          'startDateTime': _startDateTime.toIso8601String(),
-          'endDateTime': _endDateTime.toIso8601String(),
-          'notifyByTime': _notifyByTime,
-          'notifyByMeal': _notifyByMeal,
-          'intervalMinutes': _intervalMinutes,
-          'intervalHours': (_intervalMinutes / 60).round(),
-          'et': et,
-          'nfcId': nfcTagId,
-          'payload': payloadText,
-          'createdAt': now.toIso8601String(),
-        };
-        calList.add(entry);
-      }
-
-      await calFile.writeAsString(jsonEncode(calList), flush: true);
+      // Update Database
+      await db.update(
+        'calendar_alerts',
+        row,
+        where: 'id = ?',
+        whereArgs: [reminderId],
+      );
 
       if (!mounted) return;
 
@@ -1144,7 +1024,8 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         _isSaving = false;
       });
 
-      // ส่งข้อมูลกลับให้ Dashboard เพื่ออัปเดต reminders.json
+      // ส่งข้อมูลกลับ (UI เดิมอาจจะรับค่านี้ไปอัปเดต List ในหน้าแม่)
+      // แปลง key เป็น format ที่ UI ใช้อยู่ (CamelCase)
       final result = {
         'id': reminderId,
         'createby': widget.username,
@@ -1159,7 +1040,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         'medicineName': medicineName,
         'medicineDetail': medicineDetail,
         'medicineBeforeMeal': beforeMeal,
-        'medicineAfterMeal': afterMeal,
+        'medicineAfterMeal': afterMeal, // แก้ key ให้ตรงกับที่ Dashboard ใช้
+        'beforeMeal': beforeMeal, // ส่งไปเผื่อ
+        'afterMeal': afterMeal, // ส่งไปเผื่อ
         'et': et,
         'nfcId': nfcTagId,
         'payload': payloadText,
@@ -1167,11 +1050,11 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
       Navigator.pop(context, result);
     } catch (e) {
-      debugPrint('CarlendarEdit: File save error: $e');
+      debugPrint('CarlendarEdit: DB save error: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('ไม่สามารถบันทึกไฟล์ได้: $e')));
+        ).showSnackBar(SnackBar(content: Text('ไม่สามารถบันทึกในระบบได้: $e')));
         setState(() {
           _isSaving = false;
         });
@@ -1180,7 +1063,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
   }
 
   // --------------------------------------------------------------------------
-  // ส่วน Build UI ที่แก้ไขให้รองรับเมาส์ลากบน PC
+  // Build UI
   // --------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
@@ -1189,23 +1072,15 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       child: Material(
         color: Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-
-        // --- 1. ครอบ ScrollConfiguration ---
         child: ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(
-            dragDevices: {
-              PointerDeviceKind.touch,
-              PointerDeviceKind.mouse, // อนุญาตให้ใช้เมาส์ลาก
-            },
+            dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
           ),
           child: ListView(
             controller: widget.scrollController,
-            // --- 2. บังคับ Physics ---
             physics: const AlwaysScrollableScrollPhysics(),
-
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
-              // แถบลาก
               Center(
                 child: Container(
                   width: 40,
@@ -1650,9 +1525,11 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text(
-                          'บันทึกการแก้ไขการแจ้งเตือนบน NFC',
-                          style: TextStyle(
+                      : Text(
+                          _isNfcEnabled
+                              ? 'บันทึกการแก้ไขการแจ้งเตือนบน NFC'
+                              : 'บันทึกการแก้ไขการแจ้งเตือน',
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1662,7 +1539,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
               const SizedBox(height: 12),
 
-              // ปุ่มลบการแจ้งเตือนทั้งหมด (สีแดง)
+              // ปุ่มลบการแจ้งเตือนทั้งหมด
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
