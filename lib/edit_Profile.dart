@@ -33,7 +33,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   String? _customImageBase64;
 
-  // เก็บชื่อเดิมไว้ เพื่อใช้เป็น WHERE clause เวลาอัปเดต
+  // เก็บชื่อเดิมไว้ เพื่อใช้เป็น WHERE clause เวลาอัปเดต/ลบ
   late String _originalProfileName;
 
   bool _isSaving = false;
@@ -41,7 +41,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   // เรียกใช้ Database Helper
   final dbHelper = DatabaseHelper();
 
-  // ✅ 1. เพิ่มรายการรูปภาพต้นฉบับ (เหมือนหน้า Create Profile)
+  // 1. เพิ่มรายการรูปภาพต้นฉบับ (เหมือนหน้า Create Profile)
   final List<String> _avatarAssets = const [
     'assets/simpleProfile/profile_1.png',
     'assets/simpleProfile/profile_2.png',
@@ -71,7 +71,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   bool get _usingCustomImage =>
       _customImageBase64 != null && _customImageBase64!.isNotEmpty;
 
-  // ✅ 2. เพิ่มฟังก์ชันแปลง Asset เป็น Base64
+  // 2. เพิ่มฟังก์ชันแปลง Asset เป็น Base64
   Future<String> _loadAssetAsBase64(String assetPath) async {
     final byteData = await rootBundle.load(assetPath);
     final buffer = byteData.buffer;
@@ -82,7 +82,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return base64Encode(uint8list);
   }
 
-  // ✅ 3. เพิ่มฟังก์ชันเมื่อเลือกรูปจากรายการ Assets
+  // 3. เพิ่มฟังก์ชันเมื่อเลือกรูปจากรายการ Assets
   Future<void> _selectAvatarFromAssets(int index) async {
     try {
       final base64 = await _loadAssetAsBase64(_avatarAssets[index]);
@@ -156,6 +156,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       final user = await dbHelper.getUser(widget.username);
       if (user != null) {
+        // ดึงรหัสผ่านของ master user (widget.username)
         if (user['password'] == inputPassword) {
           return true;
         }
@@ -212,8 +213,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'ใส่รหัสผ่านบัญชีหลักเพื่อยืนยันการแก้ไข',
-                    style: const TextStyle(fontSize: 14, color: Colors.black),
+                    'ใส่รหัสผ่านบัญชีหลักเพื่อยืนยันการดำเนินการ', // แก้ข้อความให้เป็นกลาง
+                    style: TextStyle(fontSize: 14, color: Colors.black),
                   ),
 
                   const SizedBox(height: 10),
@@ -255,6 +256,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 
+  // --- ฟังก์ชันสำหรับการบันทึกโปรไฟล์ (เดิม) ---
   Future<void> _saveProfile() async {
     if (_isSaving) return;
 
@@ -277,13 +279,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final newName = _nameController.text.trim();
       final newInfo = _noteController.text.trim();
 
+      // ข้อมูลที่จะอัปเดต
       final Map<String, dynamic> updatedValues = {
         'userid': newName,
         'info': newInfo,
         'image_base64': _customImageBase64 ?? '',
       };
 
-      await db.update(
+      // อัปเดตโดยใช้ชื่อโปรไฟล์เดิมเป็นเงื่อนไข
+      final count = await db.update(
         'users',
         updatedValues,
         where: 'userid = ?',
@@ -292,9 +296,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('บันทึกการแก้ไขโปรไฟล์เรียบร้อย')),
-      );
+      if (count > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('บันทึกการแก้ไขโปรไฟล์เรียบร้อย')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ไม่พบโปรไฟล์ที่ต้องการแก้ไข')),
+        );
+      }
 
       Navigator.pop(context, true);
     } catch (e) {
@@ -307,6 +317,61 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  // --- ฟังก์ชันสำหรับลบโปรไฟล์ (ใหม่) ---
+  Future<void> _deleteProfile() async {
+    if (_isSaving) return;
+
+    // ยืนยันรหัสผ่านบัญชีหลักก่อน
+    final confirmed = await _showPasswordConfirmDialog();
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true; // ใช้สถานะเดียวกันเพื่อแสดง Loading
+    });
+
+    try {
+      final db = await dbHelper.database;
+
+      // ลบแถวในตาราง users โดยใช้ชื่อโปรไฟล์เดิมเป็นเงื่อนไข
+      final count = await db.delete(
+        'users',
+        where: 'userid = ?',
+        whereArgs: [_originalProfileName],
+      );
+
+      if (!mounted) return;
+
+      if (count > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('ลบโปรไฟล์ "${_originalProfileName}" เรียบร้อยแล้ว'),
+          ),
+        );
+        // Pop หน้าจอและส่งค่า true เพื่อบอกว่ามีการเปลี่ยนแปลง
+        Navigator.pop(context, true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ไม่พบโปรไฟล์ที่ต้องการลบ')),
+        );
+      }
+    } catch (e) {
+      debugPrint('editProfile: error deleting profile: $e');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('เกิดข้อผิดพลาดในการลบโปรไฟล์')),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -364,7 +429,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
 
-                // ✅ 4. เพิ่มส่วนเลือกรูปจาก Assets
+                // 4. ส่วนเลือกรูปจาก Assets
                 const SizedBox(height: 16),
                 const Text(
                   'เลือกรูปภาพมาตรฐาน',
@@ -476,6 +541,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
                 const SizedBox(height: 24),
 
+                // ปุ่มบันทึกการแก้ไข (เดิม)
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -499,6 +565,39 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           )
                         : const Text(
                             'บันทึกการแก้ไขโปรไฟล์',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+                ),
+
+                // ✅ ปุ่มลบโปรไฟล์ (ใหม่)
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isSaving ? null : _deleteProfile,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red, // พื้นแดง
+                      foregroundColor: Colors.white, // ตัวอักษรขาว
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: _isSaving
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'ลบโปรไฟล์',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,

@@ -59,7 +59,7 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
   Future<void> _loadCurrentUser() async {
     try {
       final dir = await _appDir();
-      final file = File('${dir.path}/user-stat.json');
+      final file = File('${dir.path}/pillmate/user-stat.json');
 
       if (await file.exists()) {
         final content = await file.readAsString();

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // สำหรับ rootBundle (AssetManifest)
 import 'package:path_provider/path_provider.dart';
 
 class NortificationSettingPage extends StatefulWidget {
@@ -15,369 +16,447 @@ class NortificationSettingPage extends StatefulWidget {
 }
 
 class _NortificationSettingPageState extends State<NortificationSettingPage> {
-  // เสียง (ตอนนี้มีตัวเลือกเดียว ไว้ขยายในอนาคต)
-  String _selectedSound = 'system_default';
-
-  // หน่วยเป็น "นาที"
-  int _advanceMinutes = 30; // แจ้งเตือนล่วงหน้า
-  int _afterMinutes = 30; // แจ้งเตือนต่อหลังจากถึงเวลา
-  int _playDurationMinutes =
-      1; // ระยะเวลาเล่นเสียงต่อครั้ง (ยังใช้เป็น info เฉย ๆ)
-  int _repeatGapMinutes = 5; // ช่วงห่างระหว่างแจ้งเตือนซ้ำ
-
   bool _isLoading = true;
-  bool _isSaving = false;
 
-  Future<File> _settingsFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/nortification_setting.json');
-  }
+  // --- รายชื่อไฟล์เสียงที่อ่านจาก assets ---
+  List<String> _availableSounds = [];
+
+  // --- ตัวแปรสำหรับโหมดแจ้งเตือนตามเวลา ---
+  String? _timeModeSound;
+  int _timeModeSnoozeDuration = 5; // Default 5 นาที (ต่ำสุด 3)
+  int _timeModeRepeatCount = 3; // Default 3 ครั้ง (1-10)
+
+  // --- ตัวแปรสำหรับโหมดแจ้งเตือนตามมื้ออาหาร ---
+  String? _mealModeSound;
+  TimeOfDay _breakfastTime = const TimeOfDay(hour: 6, minute: 0);
+  TimeOfDay _lunchTime = const TimeOfDay(hour: 12, minute: 0);
+  TimeOfDay _dinnerTime = const TimeOfDay(hour: 18, minute: 0);
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    _initData();
   }
 
-  Future<void> _loadSettings() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final file = await _settingsFile();
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          final json = jsonDecode(content);
-          if (json is Map<String, dynamic>) {
-            _selectedSound = json['sound']?.toString() ?? 'system_default';
-            _advanceMinutes =
-                int.tryParse('${json['advanceMinutes'] ?? 30}') ?? 30;
-            _afterMinutes = int.tryParse('${json['afterMinutes'] ?? 30}') ?? 30;
-            _playDurationMinutes =
-                int.tryParse('${json['playDurationMinutes'] ?? 1}') ?? 1;
-            _repeatGapMinutes =
-                int.tryParse('${json['repeatGapMinutes'] ?? 5}') ?? 5;
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('NortificationSetting: load error $e');
-    }
-
+  Future<void> _initData() async {
+    await _loadSoundAssets();
+    await _loadSettingsFromJson();
     setState(() {
       _isLoading = false;
     });
   }
 
-  Future<void> _saveSettings() async {
-    if (_isSaving) return;
-
-    setState(() {
-      _isSaving = true;
-    });
-
+  // ✅ 1. โหลดรายชื่อไฟล์เสียงจาก assets/sound_norti/
+  Future<void> _loadSoundAssets() async {
     try {
-      final file = await _settingsFile();
-      final map = {
-        'sound': _selectedSound,
-        'advanceMinutes': _advanceMinutes,
-        'afterMinutes': _afterMinutes,
-        'playDurationMinutes': _playDurationMinutes,
-        'repeatGapMinutes': _repeatGapMinutes,
-      };
-      await file.writeAsString(jsonEncode(map), flush: true);
+      final manifestContent = await DefaultAssetBundle.of(
+        context,
+      ).loadString('AssetManifest.json');
+      final Map<String, dynamic> manifestMap = json.decode(manifestContent);
+
+      // กรองเอาเฉพาะไฟล์ใน folder assets/sound_norti/
+      final sounds = manifestMap.keys
+          .where((key) => key.contains('assets/sound_norti/'))
+          .toList();
+
+      // เอาแค่ชื่อไฟล์เพื่อให้แสดงผลง่ายขึ้น (แต่ตอนเก็บค่า เก็บ path เต็มหรือชื่อไฟล์ก็ได้)
+      // ในที่นี้ขอเก็บ path เต็ม เพื่อความชัวร์เวลาเรียกใช้
+      setState(() {
+        _availableSounds = sounds;
+        if (_availableSounds.isNotEmpty) {
+          // Default sound ถ้ายังไม่มีค่า
+          _timeModeSound = _availableSounds.first;
+          _mealModeSound = _availableSounds.first;
+        }
+      });
+    } catch (e) {
+      debugPrint('Error loading sound assets: $e');
+    }
+  }
+
+  // ✅ 2. โหลดค่า Setting จาก appstatus.json
+  Future<void> _loadSettingsFromJson() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/pillmate/appstatus.json');
+
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          final data = jsonDecode(content) as Map<String, dynamic>;
+
+          // --- โหมดเวลา ---
+          if (data['time_mode_sound'] != null &&
+              _availableSounds.contains(data['time_mode_sound'])) {
+            _timeModeSound = data['time_mode_sound'];
+          }
+          if (data['time_mode_snooze_duration'] != null) {
+            int val = data['time_mode_snooze_duration'];
+            if (val < 3) val = 3; // บังคับขั้นต่ำ 3
+            _timeModeSnoozeDuration = val;
+          }
+          if (data['time_mode_repeat_count'] != null) {
+            _timeModeRepeatCount = data['time_mode_repeat_count'];
+          }
+
+          // --- โหมดมื้ออาหาร ---
+          if (data['meal_mode_sound'] != null &&
+              _availableSounds.contains(data['meal_mode_sound'])) {
+            _mealModeSound = data['meal_mode_sound'];
+          }
+          if (data['meal_breakfast_time'] != null) {
+            _breakfastTime = _parseTime(data['meal_breakfast_time']);
+          }
+          if (data['meal_lunch_time'] != null) {
+            _lunchTime = _parseTime(data['meal_lunch_time']);
+          }
+          if (data['meal_dinner_time'] != null) {
+            _dinnerTime = _parseTime(data['meal_dinner_time']);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading settings json: $e');
+    }
+  }
+
+  // ✅ 3. บันทึกค่าลง appstatus.json
+  Future<void> _saveSettings() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/pillmate/appstatus.json');
+
+      Map<String, dynamic> data = {};
+      // อ่านข้อมูลเก่าก่อน (เพื่อไม่ให้ทับค่า nfc_enabled)
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          data = jsonDecode(content) as Map<String, dynamic>;
+        }
+      }
+
+      // อัปเดตค่าใหม่
+      data['time_mode_sound'] = _timeModeSound;
+      data['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
+      data['time_mode_repeat_count'] = _timeModeRepeatCount;
+
+      data['meal_mode_sound'] = _mealModeSound;
+      data['meal_breakfast_time'] = _formatTime(_breakfastTime);
+      data['meal_lunch_time'] = _formatTime(_lunchTime);
+      data['meal_dinner_time'] = _formatTime(_dinnerTime);
+
+      data['updated_at'] = DateTime.now().toIso8601String();
+
+      await file.writeAsString(jsonEncode(data));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('บันทึกการตั้งค่าการแจ้งเตือนเรียบร้อย'),
-          ),
+          const SnackBar(content: Text('บันทึกการตั้งค่าเรียบร้อยแล้ว')),
         );
       }
     } catch (e) {
-      debugPrint('NortificationSetting: save error $e');
+      debugPrint('Error saving settings: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('บันทึกการตั้งค่าไม่สำเร็จ: $e')),
+          SnackBar(content: Text('เกิดข้อผิดพลาดในการบันทึก: $e')),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
       }
     }
   }
 
-  List<DropdownMenuItem<int>> _buildMinutesItems(int start, int end) {
-    return List<DropdownMenuItem<int>>.generate(end - start + 1, (i) {
-      final v = start + i;
-      return DropdownMenuItem(
-        value: v,
-        child: Text(
-          v.toString().padLeft(2, '0'),
-          style: const TextStyle(color: Colors.black),
-        ),
-      );
-    });
+  // Helper แปลง String HH:mm -> TimeOfDay
+  TimeOfDay _parseTime(String timeStr) {
+    final parts = timeStr.split(':');
+    return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+  }
+
+  // Helper แปลง TimeOfDay -> String HH:mm
+  String _formatTime(TimeOfDay time) {
+    final h = time.hour.toString().padLeft(2, '0');
+    final m = time.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  String _getFileName(String path) {
+    return path.split('/').last;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('ตั้งค่าการแจ้งเตือน')),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-          : Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: ListView(
-                children: [
-                  const Text(
-                    'เสียงแจ้งเตือน',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: _selectedSound,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'system_default',
-                        child: Text(
-                          'ใช้เสียงแจ้งเตือนของระบบ',
-                          style: TextStyle(color: Colors.black87),
-                        ),
-                      ),
-                      // จะเพิ่มเสียงอื่นจาก assets ค่อยมาเติม
-                    ],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() {
-                        _selectedSound = v;
-                      });
-                    },
-                  ),
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
-                  const SizedBox(height: 24),
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('ตั้งค่าการแจ้งเตือน'),
+          backgroundColor: Colors.teal,
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'แจ้งเตือนตามเวลา'),
+              Tab(text: 'แจ้งเตือนตามมื้ออาหาร'),
+            ],
+            indicatorColor: Colors.white,
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.save),
+              onPressed: _saveSettings,
+              tooltip: 'บันทึก',
+            ),
+          ],
+        ),
+        body: TabBarView(
+          children: [_buildTimeModeView(), _buildMealModeView()],
+        ),
+      ),
+    );
+  }
 
-                  // แจ้งเตือนล่วงหน้า
-                  const Text(
-                    'แจ้งเตือนล่วงหน้า (นาที)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<int>(
-                          value: _advanceMinutes.clamp(0, 60),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                          items: _buildMinutesItems(0, 60),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _advanceMinutes = v;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'นาที',
-                        style: TextStyle(color: Colors.black87),
-                      ),
-                    ],
-                  ),
+  // ---------- UI: โหมดแจ้งเตือนตามเวลา ----------
+  Widget _buildTimeModeView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'ตั้งค่าเสียงและการย้ำเตือน',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
 
-                  const SizedBox(height: 24),
+          // 1. เลือกไฟล์เสียง
+          _buildSoundSelector(
+            label: 'เสียงแจ้งเตือน',
+            value: _timeModeSound,
+            onChanged: (val) {
+              setState(() {
+                _timeModeSound = val;
+              });
+            },
+          ),
 
-                  // แจ้งเตือนต่อหลังจากถึงเวลา
-                  const Text(
-                    'แจ้งเตือนต่อหลังจากถึงเวลา (นาที)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<int>(
-                          value: _afterMinutes.clamp(0, 60),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                          items: _buildMinutesItems(0, 60),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _afterMinutes = v;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'นาที',
-                        style: TextStyle(color: Colors.black87),
-                      ),
-                    ],
-                  ),
+          const SizedBox(height: 24),
 
-                  const SizedBox(height: 24),
+          // 2. ระยะเวลาการย้ำเตือน (Snooze Duration)
+          const Text('ระยะเวลาย้ำเตือน (นาที)', style: TextStyle(fontSize: 16)),
+          Row(
+            children: [
+              Expanded(
+                child: Slider(
+                  value: _timeModeSnoozeDuration.toDouble(),
+                  min: 3, // ต่ำสุด 3 นาที
+                  max: 60,
+                  divisions: 57,
+                  label: '$_timeModeSnoozeDuration นาที',
+                  activeColor: Colors.teal,
+                  onChanged: (val) {
+                    setState(() {
+                      _timeModeSnoozeDuration = val.toInt();
+                    });
+                  },
+                ),
+              ),
+              Text(
+                '$_timeModeSnoozeDuration นาที',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const Text(
+            '* ต่ำสุด 3 นาที',
+            style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
 
-                  const Text(
-                    'ระยะเวลาที่แจ้งเตือนต่อครั้ง (นาที)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<int>(
-                          value: _playDurationMinutes.clamp(1, 5),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                          items: _buildMinutesItems(1, 5),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _playDurationMinutes = v;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'นาที (ใช้เพื่ออธิบายความยาวเสียงเท่านั้น)',
-                        style: TextStyle(color: Colors.black87),
-                      ),
-                    ],
-                  ),
+          const SizedBox(height: 24),
 
-                  const SizedBox(height: 24),
-
-                  const Text(
-                    'ช่วงเวลาเว้นระหว่างการแจ้งเตือนซ้ำ (นาที)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<int>(
-                          value: _repeatGapMinutes.clamp(1, 30),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                          items: _buildMinutesItems(1, 30),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _repeatGapMinutes = v;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'นาที',
-                        style: TextStyle(color: Colors.black87),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 32),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isSaving ? null : _saveSettings,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: _isSaving
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text(
-                              'บันทึกการตั้งค่า',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                    ),
-                  ),
-                ],
+          // 3. จำนวนครั้งการย้ำเตือน (Repeat Count)
+          const Text('จำนวนครั้งการย้ำเตือน', style: TextStyle(fontSize: 16)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                value: _timeModeRepeatCount,
+                isExpanded: true,
+                items: List.generate(10, (index) {
+                  int count = index + 1;
+                  return DropdownMenuItem(
+                    value: count,
+                    child: Text('$count ครั้ง'),
+                  );
+                }),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() {
+                      _timeModeRepeatCount = val;
+                    });
+                  }
+                },
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- UI: โหมดแจ้งเตือนตามมื้ออาหาร ----------
+  Widget _buildMealModeView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'ตั้งค่าเสียงและเวลามื้ออาหาร',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+
+          // 1. เลือกไฟล์เสียง
+          _buildSoundSelector(
+            label: 'เสียงแจ้งเตือนมื้ออาหาร',
+            value: _mealModeSound,
+            onChanged: (val) {
+              setState(() {
+                _mealModeSound = val;
+              });
+            },
+          ),
+
+          const SizedBox(height: 24),
+          const Text(
+            'กำหนดเวลามื้ออาหาร (ค่าเริ่มต้น)',
+            style: TextStyle(fontSize: 16),
+          ),
+          const SizedBox(height: 16),
+
+          // 2. เวลามื้อเช้า
+          _buildTimePickerRow(
+            label: 'มื้อเช้า',
+            time: _breakfastTime,
+            onChanged: (newTime) {
+              setState(() => _breakfastTime = newTime);
+            },
+          ),
+          const Divider(),
+
+          // 3. เวลามื้อเที่ยง
+          _buildTimePickerRow(
+            label: 'มื้อเที่ยง',
+            time: _lunchTime,
+            onChanged: (newTime) {
+              setState(() => _lunchTime = newTime);
+            },
+          ),
+          const Divider(),
+
+          // 4. เวลามื้อเย็น
+          _buildTimePickerRow(
+            label: 'มื้อเย็น',
+            time: _dinnerTime,
+            onChanged: (newTime) {
+              setState(() => _dinnerTime = newTime);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Widget เลือกไฟล์เสียง
+  Widget _buildSoundSelector({
+    required String label,
+    required String? value,
+    required Function(String?) onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 16)),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              hint: const Text('เลือกไฟล์เสียง'),
+              isExpanded: true,
+              items: _availableSounds.isEmpty
+                  ? [
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text('ไม่พบไฟล์เสียง'),
+                      ),
+                    ]
+                  : _availableSounds.map((soundPath) {
+                      return DropdownMenuItem(
+                        value: soundPath,
+                        child: Text(_getFileName(soundPath)),
+                      );
+                    }).toList(),
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Widget เลือกเวลา
+  Widget _buildTimePickerRow({
+    required String label,
+    required TimeOfDay time,
+    required Function(TimeOfDay) onChanged,
+  }) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.teal.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.teal),
+        ),
+        child: Text(
+          _formatTime(time),
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.teal,
+          ),
+        ),
+      ),
+      onTap: () async {
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: time,
+          builder: (context, child) {
+            return MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(alwaysUse24HourFormat: true),
+              child: child!,
+            );
+          },
+        );
+        if (picked != null) {
+          onChanged(picked);
+        }
+      },
     );
   }
 }

@@ -113,12 +113,12 @@ class _CarlendarPageState extends State<CarlendarPage> {
 
   Future<File> _userStatFile() async {
     final dir = await _appDir();
-    return File('${dir.path}/user-stat.json');
+    return File('${dir.path}/pillmate/user-stat.json');
   }
 
   Future<File> _calendarFile() async {
     final dir = await _appDir();
-    return File('${dir.path}/carlendar.json');
+    return File('${dir.path}/pillmate/carlendar.json');
   }
 
   Future<void> _loadCalendarEntries() async {

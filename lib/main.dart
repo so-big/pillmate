@@ -95,7 +95,7 @@ class _LoginPageState extends State<LoginPage> {
   // ยังใช้ไฟล์นี้สำหรับเก็บสถานะ Remember Me เหมือนเดิม (แยกจาก Database หลัก)
   Future<File> _userStatFile() async {
     final dir = await _appDir();
-    return File('${dir.path}/user-stat.json');
+    return File('${dir.path}/pillmate/user-stat.json');
   }
 
   @override

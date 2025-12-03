@@ -31,9 +31,30 @@ class DatabaseHelper {
     }
 
     Directory documentsDirectory = await getApplicationDocumentsDirectory();
-    String path = join(documentsDirectory.path, "user");
 
-    // ตรวจสอบว่ามีไฟล์ DB หรือยัง ถ้าไม่มีให้ copy จาก assets
+    // 1. กำหนด path ของโฟลเดอร์ pillmate
+    String pillmateDirPath = join(documentsDirectory.path, "pillmate");
+
+    // 2. ✅ ตรวจสอบและสร้างโฟลเดอร์ pillmate หากยังไม่มี
+    if (!await Directory(pillmateDirPath).exists()) {
+      try {
+        // สร้างโฟลเดอร์แบบ recursive (ถ้า Documents ไม่ใช่ root)
+        await Directory(pillmateDirPath).create(recursive: true);
+        print("Created pillmate directory at: $pillmateDirPath");
+      } catch (e) {
+        print("Error creating directory: $e");
+        // ถ้าสร้างไม่ได้ อาจจะเกิดปัญหาในการบันทึกไฟล์ database ต่อไป
+        // แต่เราจะลองไปต่อเผื่อมี error อื่นๆ
+      }
+    }
+
+    // 3. กำหนด path ของไฟล์ database ภายในโฟลเดอร์นั้น
+    String path = join(
+      pillmateDirPath,
+      "user",
+    ); // ไฟล์จะอยู่ที่ .../Documents/pillmate/user
+
+    // 4. ตรวจสอบว่ามีไฟล์ DB หรือยัง ถ้าไม่มีให้ copy จาก assets
     if (FileSystemEntity.typeSync(path) == FileSystemEntityType.notFound) {
       try {
         ByteData data = await rootBundle.load("assets/db/user");
@@ -41,8 +62,9 @@ class DatabaseHelper {
           data.offsetInBytes,
           data.lengthInBytes,
         );
-        await File(path).writeAsBytes(bytes);
-        print("Copied DB from assets");
+        // การเขียนไฟล์จะสำเร็จเพราะโฟลเดอร์ปลายทาง (pillmateDirPath) ถูกสร้างแล้ว
+        await File(path).writeAsBytes(bytes, flush: true);
+        print("Copied DB from assets to $path");
       } catch (e) {
         print("Error copying DB: $e");
       }

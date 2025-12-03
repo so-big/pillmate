@@ -5,7 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'nortification_setup.dart';
+import 'nortification_next.dart';
 import 'view_carlendar.dart';
 import 'add_carlendar.dart';
 import 'edit_carlendar.dart'; // ✅ ต้องมั่นใจว่าในไฟล์นี้มี class CarlendarEditSheet
@@ -53,12 +53,12 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<File> _userStatFile() async {
     final dir = await _appDir();
-    return File('${dir.path}/user-stat.json');
+    return File('${dir.path}/pillmate/user-stat.json');
   }
 
   Future<File> _appStatusFile() async {
     final dir = await _appDir();
-    return File('${dir.path}/appstatus.json');
+    return File('${dir.path}/pillmate/appstatus.json');
   }
 
   // ---------- STATE ----------

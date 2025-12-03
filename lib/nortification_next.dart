@@ -1,4 +1,4 @@
-// lib/nortification_setup.dart
+// lib/nortification_next.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -9,7 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
-/// โครงสร้างบันทึกใน nortification_setup.json (log ว่าตั้ง noti อะไรไว้แล้วบ้าง)
+/// โครงสร้างบันทึกใน pillmate/nortification_setup.json (log ว่าตั้ง noti อะไรไว้แล้วบ้าง)
 class ScheduledNotify {
   final String userid;
   final String reminderId;
@@ -55,7 +55,7 @@ class NortificationSetup {
       File('${(await _appDir()).path}/nortification_setting.json');
 
   static Future<File> _setupFile() async =>
-      File('${(await _appDir()).path}/nortification_setup.json');
+      File('${(await _appDir()).path}/pillmate/nortification_setup.json');
 
   // ------------ INIT PLUGIN ------------
 
@@ -233,7 +233,7 @@ class NortificationSetup {
       }
     }
 
-    // 3) เขียน nortification_setup.json ใหม่ (log เฉพาะของ user ปัจจุบัน)
+    // 3) เขียน pillmate/nortification_setup.json ใหม่ (log เฉพาะของ user ปัจจุบัน)
     try {
       final file = await _setupFile();
       await file.writeAsString(

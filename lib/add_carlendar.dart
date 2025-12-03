@@ -72,7 +72,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
   Future<void> _loadNfcStatus() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/appstatus.json');
+      final file = File('${dir.path}/pillmate/appstatus.json');
       if (await file.exists()) {
         final content = await file.readAsString();
         if (content.trim().isNotEmpty) {

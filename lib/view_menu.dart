@@ -11,13 +11,13 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 // Database Helper
 import 'database_helper.dart';
 
-// หน้า setting การแจ้งเตือน
+// ✅ เรียกใช้หน้า setting ที่สร้างใหม่
 import 'nortification_setting.dart';
 
 // ตัวแปรเทสต์แจ้งเตือน
 int norti_test = 1; // 1 = ให้ดังตอนกดเทสต์, 0 = ปิด
 
-// ---------- ส่วนสำหรับทดสอบแจ้งเตือน (เฉพาะเมนูนี้) ----------
+// ---------- ส่วนสำหรับทดสอบแจ้งเตือน (ปรับปรุงให้รองรับ Windows) ----------
 
 final FlutterLocalNotificationsPlugin _testNotiPlugin =
     FlutterLocalNotificationsPlugin();
@@ -27,52 +27,76 @@ bool _testNotiInitialized = false;
 Future<void> _initTestNotifications() async {
   if (_testNotiInitialized) return;
 
+  // 1. ตั้งค่าสำหรับ Android
   const AndroidInitializationSettings androidInit =
       AndroidInitializationSettings('@mipmap/ic_launcher');
 
-  const InitializationSettings initSettings = InitializationSettings(
+  // 2. ตั้งค่าสำหรับ Linux/Windows (ใช้ Linux setting เป็นพื้นฐานสำหรับ Desktop บางตัว)
+  const LinuxInitializationSettings linuxInit = LinuxInitializationSettings(
+    defaultActionName: 'Open notification',
+  );
+
+  // 3. ตั้งค่าสำหรับ iOS (ใส่ไว้กัน error หากรันบน mac/ios)
+  const DarwinInitializationSettings darwinInit =
+      DarwinInitializationSettings();
+
+  final InitializationSettings initSettings = InitializationSettings(
     android: androidInit,
+    linux: linuxInit,
+    iOS: darwinInit,
+    macOS: darwinInit,
   );
 
   await _testNotiPlugin.initialize(initSettings);
 
-  try {
-    final androidImpl = _testNotiPlugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
-    await androidImpl?.requestNotificationsPermission();
-  } catch (e) {
-    debugPrint('LeftMenu: requestNotificationsPermission error: $e');
+  // ขอ Permission เฉพาะบน Android (Windows ไม่ต้องขอแบบนี้)
+  if (Platform.isAndroid) {
+    try {
+      final androidImpl = _testNotiPlugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      await androidImpl?.requestNotificationsPermission();
+    } catch (e) {
+      debugPrint('LeftMenu: requestNotificationsPermission error: $e');
+    }
   }
 
   _testNotiInitialized = true;
 }
 
 Future<void> _showTestAlarm() async {
-  await _initTestNotifications();
+  try {
+    await _initTestNotifications();
 
-  const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-    'pillmate_alarm_test', // channel สำหรับ test
-    'Pillmate Alarm Test',
-    channelDescription: 'ทดสอบเสียงแจ้งเตือนแบบนาฬิกาปลุก',
-    importance: Importance.max,
-    priority: Priority.high,
-    playSound: true,
-    sound: RawResourceAndroidNotificationSound('alarm'),
-    fullScreenIntent: true,
-  );
+    // ตั้งค่า Android Specific
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'pillmate_alarm_test', // channel id
+          'Pillmate Alarm Test',
+          channelDescription: 'ทดสอบเสียงแจ้งเตือนแบบนาฬิกาปลุก',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          sound: RawResourceAndroidNotificationSound('alarm'),
+          fullScreenIntent: true,
+        );
 
-  const NotificationDetails details = NotificationDetails(
-    android: androidDetails,
-  );
+    // ตั้งค่าทั่วไป (NotificationDetails)
+    const NotificationDetails details = NotificationDetails(
+      android: androidDetails,
+    );
 
-  await _testNotiPlugin.show(
-    9999,
-    'ทดสอบเสียงแจ้งเตือน',
-    'เสียงนี้คือทดสอบแจ้งเตือนแบบนาฬิกาปลุก',
-    details,
-  );
+    await _testNotiPlugin.show(
+      9999,
+      'ทดสอบเสียงแจ้งเตือน',
+      'เสียงนี้คือทดสอบแจ้งเตือน (Alarm Mode)',
+      details,
+    );
+  } catch (e) {
+    debugPrint('Show Test Alarm Error: $e');
+    // กันแอปเด้งถ้ารันบน Windows แล้ว Plugin ยังไม่สมบูรณ์
+  }
 }
 
 // -----------------------------------------------------------
@@ -80,21 +104,20 @@ Future<void> _showTestAlarm() async {
 class LeftMenu extends StatefulWidget {
   final String username;
 
-  final VoidCallback
-  onShowDashboard; // เมนูใหม่: จัดการกำหนดการรายวัน (Dashboard)
-  final VoidCallback onManageCalendar; // จัดการปฏิทินแจ้งเตือน (Calendar)
-  final VoidCallback onCreateProfile; // เพิ่มโปรไฟล์
-  final VoidCallback onmanage_profile; // จัดการโปรไฟล์
+  final VoidCallback onShowDashboard;
+  final VoidCallback onManageCalendar;
+  final VoidCallback onCreateProfile;
+  final VoidCallback onmanage_profile;
 
-  final VoidCallback onAddMedicine; // เพิ่มยา
-  final VoidCallback onManageMedicine; // จัดการยา
+  final VoidCallback onAddMedicine;
+  final VoidCallback onManageMedicine;
 
-  final VoidCallback onLogout; // ออกจากระบบ
+  final VoidCallback onLogout;
 
   const LeftMenu({
     super.key,
     required this.username,
-    required this.onShowDashboard, // รับค่า callback สำหรับ dashboard
+    required this.onShowDashboard,
     required this.onManageCalendar,
     required this.onCreateProfile,
     required this.onmanage_profile,
@@ -109,7 +132,7 @@ class LeftMenu extends StatefulWidget {
 
 class _LeftMenuState extends State<LeftMenu> {
   String? _imageBase64;
-  bool _isNfcEnabled = false; // ค่าเริ่มต้นเป็น false (ปิด)
+  bool _isNfcEnabled = false;
 
   @override
   void initState() {
@@ -118,7 +141,6 @@ class _LeftMenuState extends State<LeftMenu> {
     _loadNfcStatus();
   }
 
-  // แก้ไข: ดึงรูปภาพจาก Database (คอลัมน์ image_base64)
   Future<void> _loadUserImage() async {
     try {
       final dbHelper = DatabaseHelper();
@@ -138,13 +160,11 @@ class _LeftMenuState extends State<LeftMenu> {
     }
   }
 
-  // ✅ ฟังก์ชันหาไฟล์ appstatus.json
   Future<File> get _appStatusFile async {
     final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/appstatus.json');
+    return File('${dir.path}/pillmate/appstatus.json');
   }
 
-  // ✅ ฟังก์ชันโหลดสถานะ NFC
   Future<void> _loadNfcStatus() async {
     try {
       final file = await _appStatusFile;
@@ -164,16 +184,13 @@ class _LeftMenuState extends State<LeftMenu> {
     }
   }
 
-  // ✅ ฟังก์ชันบันทึกสถานะ NFC ลง JSON
   Future<void> _toggleNfc(bool value) async {
-    // อัปเดต UI ก่อน
     setState(() {
       _isNfcEnabled = value;
     });
 
     try {
       final file = await _appStatusFile;
-      // อ่านข้อมูลเดิมก่อน (ถ้ามี)
       Map<String, dynamic> data = {};
       if (await file.exists()) {
         final content = await file.readAsString();
@@ -184,21 +201,18 @@ class _LeftMenuState extends State<LeftMenu> {
         }
       }
 
-      // อัปเดตค่า NFC
       data['nfc_enabled'] = value;
       data['updated_at'] = DateTime.now().toIso8601String();
 
       await file.writeAsString(jsonEncode(data));
       debugPrint('Saved NFC status: $value to appstatus.json');
 
-      // ✅ สั่ง Refresh Dashboard ทันที
       widget.onShowDashboard();
     } catch (e) {
       debugPrint('LeftMenu: error saving NFC status: $e');
     }
   }
 
-  // ✅ ฟังก์ชันแสดง Dialog แจ้งเตือนตามสถานะ NFC
   Future<void> _showNfcInfoDialog(bool isEnabled) async {
     String message;
     if (isEnabled) {
@@ -214,17 +228,11 @@ class _LeftMenuState extends State<LeftMenu> {
         return AlertDialog(
           title: const Text(
             'การตั้งค่า NFC',
-            style: TextStyle(
-              color: Colors.black,
-              fontWeight: FontWeight.bold,
-            ), // หัวข้อสีดำ
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
           ),
           content: Text(
             message,
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 16,
-            ), // ✅ เนื้อหาตัวหนังสือสีดำ
+            style: const TextStyle(color: Colors.black, fontSize: 16),
           ),
           actions: [
             TextButton(
@@ -282,13 +290,10 @@ class _LeftMenuState extends State<LeftMenu> {
             accountEmail: const Text('Pillmate User'),
             currentAccountPicture: _buildAvatar(),
           ),
-
-          // ทำเลื่อนเผื่อเมนูยาว
           Expanded(
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                // เมนู 1: จัดการกำหนดการรายวัน (ไปหน้า Dashboard)
                 ListTile(
                   leading: const Icon(Icons.dashboard),
                   title: const Text(
@@ -300,8 +305,6 @@ class _LeftMenuState extends State<LeftMenu> {
                     widget.onShowDashboard();
                   },
                 ),
-
-                // เมนู 2: จัดการปฏิทินแจ้งเตือน (ไปหน้า Calendar)
                 ListTile(
                   leading: const Icon(Icons.calendar_month),
                   title: const Text(
@@ -313,10 +316,7 @@ class _LeftMenuState extends State<LeftMenu> {
                     widget.onManageCalendar();
                   },
                 ),
-
                 const Divider(height: 1),
-
-                // เมนู 3: เพิ่มยา
                 ListTile(
                   leading: const Icon(Icons.medication),
                   title: const Text(
@@ -328,8 +328,6 @@ class _LeftMenuState extends State<LeftMenu> {
                     widget.onAddMedicine();
                   },
                 ),
-
-                // เมนู 4: จัดการยา
                 ListTile(
                   leading: const Icon(Icons.medication_liquid),
                   title: const Text(
@@ -341,10 +339,7 @@ class _LeftMenuState extends State<LeftMenu> {
                     widget.onManageMedicine();
                   },
                 ),
-
                 const Divider(height: 1),
-
-                // เมนู 5: เพิ่มโปรไฟล์
                 ListTile(
                   leading: const Icon(Icons.person_add),
                   title: const Text(
@@ -356,8 +351,6 @@ class _LeftMenuState extends State<LeftMenu> {
                     widget.onCreateProfile();
                   },
                 ),
-
-                // เมนู 6: จัดการโปรไฟล์
                 ListTile(
                   leading: const Icon(Icons.manage_accounts),
                   title: const Text(
@@ -369,10 +362,8 @@ class _LeftMenuState extends State<LeftMenu> {
                     widget.onmanage_profile();
                   },
                 ),
-
                 const Divider(height: 1),
-
-                // เมนู: ตั้งค่าการแจ้งเตือน
+                // ✅ เมนูตั้งค่าการแจ้งเตือน
                 ListTile(
                   leading: const Icon(Icons.notifications_active),
                   title: const Text(
@@ -381,12 +372,11 @@ class _LeftMenuState extends State<LeftMenu> {
                   ),
                   onTap: () async {
                     Navigator.pop(context);
-
-                    // ถ้าเปิด test mode -> ยิง noti เสียงดังเหมือนนาฬิกาปลุก
+                    // ถ้าเปิด test mode -> ยิง noti
                     if (norti_test == 1) {
                       await _showTestAlarm();
                     }
-
+                    // ไปหน้า NortificationSettingPage
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -395,9 +385,7 @@ class _LeftMenuState extends State<LeftMenu> {
                     );
                   },
                 ),
-
-                const Divider(height: 1), // ✅ ขีดแบ่ง Section ก่อน NFC
-                // ✅ เมนูใหม่: สวิตช์เปิด/ปิด NFC
+                const Divider(height: 1),
                 SwitchListTile(
                   secondary: const Icon(Icons.nfc),
                   title: const Text(
@@ -406,9 +394,7 @@ class _LeftMenuState extends State<LeftMenu> {
                   ),
                   value: _isNfcEnabled,
                   onChanged: (bool value) async {
-                    // 1. บันทึกค่า และ Refresh Dashboard
                     await _toggleNfc(value);
-                    // 2. แสดง Dialog แจ้งเตือน
                     if (context.mounted) {
                       await _showNfcInfoDialog(value);
                     }
@@ -418,10 +404,7 @@ class _LeftMenuState extends State<LeftMenu> {
               ],
             ),
           ),
-
           const Divider(height: 1),
-
-          // เมนูล่างสุด: ออกจากระบบ
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text(
