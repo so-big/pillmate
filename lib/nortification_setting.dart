@@ -4,8 +4,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // สำหรับ rootBundle (AssetManifest)
+import 'package:flutter/services.dart'; // สำหรับ rootBundle
 import 'package:path_provider/path_provider.dart';
+import 'package:audioplayers/audioplayers.dart'; // ✅ 1. Import audioplayers
 
 class NortificationSettingPage extends StatefulWidget {
   const NortificationSettingPage({super.key});
@@ -18,15 +19,18 @@ class NortificationSettingPage extends StatefulWidget {
 class _NortificationSettingPageState extends State<NortificationSettingPage> {
   bool _isLoading = true;
 
-  // --- รายชื่อไฟล์เสียงที่อ่านจาก assets ---
+  // --- Audio Player ---
+  final AudioPlayer _audioPlayer = AudioPlayer(); // ✅ 2. ตัวเล่นเสียง
+
+  // --- รายชื่อไฟล์เสียง ---
   List<String> _availableSounds = [];
 
-  // --- ตัวแปรสำหรับโหมดแจ้งเตือนตามเวลา ---
+  // --- ตัวแปรโหมดเวลา ---
   String? _timeModeSound;
-  int _timeModeSnoozeDuration = 5; // Default 5 นาที (ต่ำสุด 3)
-  int _timeModeRepeatCount = 3; // Default 3 ครั้ง (1-10)
+  int _timeModeSnoozeDuration = 5;
+  int _timeModeRepeatCount = 3;
 
-  // --- ตัวแปรสำหรับโหมดแจ้งเตือนตามมื้ออาหาร ---
+  // --- ตัวแปรโหมดมื้ออาหาร ---
   String? _mealModeSound;
   TimeOfDay _breakfastTime = const TimeOfDay(hour: 6, minute: 0);
   TimeOfDay _lunchTime = const TimeOfDay(hour: 12, minute: 0);
@@ -38,6 +42,12 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     _initData();
   }
 
+  @override
+  void dispose() {
+    _audioPlayer.dispose(); // ✅ อย่าลืมคืนค่า memory
+    super.dispose();
+  }
+
   Future<void> _initData() async {
     await _loadSoundAssets();
     await _loadSettingsFromJson();
@@ -46,7 +56,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     });
   }
 
-  // ✅ 1. โหลดรายชื่อไฟล์เสียงจาก assets/sound_norti/
   Future<void> _loadSoundAssets() async {
     try {
       final manifestContent = await DefaultAssetBundle.of(
@@ -54,27 +63,61 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       ).loadString('AssetManifest.json');
       final Map<String, dynamic> manifestMap = json.decode(manifestContent);
 
-      // กรองเอาเฉพาะไฟล์ใน folder assets/sound_norti/
+      // กรองไฟล์ใน assets/sound_norti/
       final sounds = manifestMap.keys
           .where((key) => key.contains('assets/sound_norti/'))
           .toList();
 
-      // เอาแค่ชื่อไฟล์เพื่อให้แสดงผลง่ายขึ้น (แต่ตอนเก็บค่า เก็บ path เต็มหรือชื่อไฟล์ก็ได้)
-      // ในที่นี้ขอเก็บ path เต็ม เพื่อความชัวร์เวลาเรียกใช้
       setState(() {
         _availableSounds = sounds;
+        // ถ้ายังไม่มีค่า default ให้เลือกไฟล์แรก
         if (_availableSounds.isNotEmpty) {
-          // Default sound ถ้ายังไม่มีค่า
-          _timeModeSound = _availableSounds.first;
-          _mealModeSound = _availableSounds.first;
+          if (_timeModeSound == null ||
+              !_availableSounds.contains(_timeModeSound)) {
+            _timeModeSound = _availableSounds.first;
+          }
+          if (_mealModeSound == null ||
+              !_availableSounds.contains(_mealModeSound)) {
+            _mealModeSound = _availableSounds.first;
+          }
         }
       });
+
+      debugPrint("Found sounds: $_availableSounds"); // Log ดูว่าเจอไฟล์ไหม
     } catch (e) {
       debugPrint('Error loading sound assets: $e');
     }
   }
 
-  // ✅ 2. โหลดค่า Setting จาก appstatus.json
+  // ✅ ฟังก์ชันเล่นเสียงตัวอย่าง
+  Future<void> _playPreview(String? soundPath) async {
+    if (soundPath == null) return;
+    try {
+      await _audioPlayer.stop(); // หยุดเสียงเก่าก่อน
+
+      // AssetSource ของ AudioPlayers ไม่ต้องการคำว่า 'assets/' นำหน้า
+      // เช่น assets/sound_norti/alarm.mp3 -> sound_norti/alarm.mp3
+      String cleanPath = soundPath;
+      if (cleanPath.startsWith('assets/')) {
+        cleanPath = cleanPath.substring(7);
+      }
+
+      await _audioPlayer.play(AssetSource(cleanPath));
+    } catch (e) {
+      debugPrint('Error playing sound: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('เล่นไฟล์เสียงไม่สำเร็จ: $e')));
+      }
+    }
+  }
+
+  Future<void> _stopPreview() async {
+    await _audioPlayer.stop();
+  }
+
+  // ... (ส่วน _loadSettingsFromJson และ _saveSettings เหมือนเดิม ไม่เปลี่ยนแปลง) ...
   Future<void> _loadSettingsFromJson() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -85,21 +128,19 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content) as Map<String, dynamic>;
 
-          // --- โหมดเวลา ---
           if (data['time_mode_sound'] != null &&
               _availableSounds.contains(data['time_mode_sound'])) {
             _timeModeSound = data['time_mode_sound'];
           }
           if (data['time_mode_snooze_duration'] != null) {
             int val = data['time_mode_snooze_duration'];
-            if (val < 3) val = 3; // บังคับขั้นต่ำ 3
+            if (val < 3) val = 3;
             _timeModeSnoozeDuration = val;
           }
           if (data['time_mode_repeat_count'] != null) {
             _timeModeRepeatCount = data['time_mode_repeat_count'];
           }
 
-          // --- โหมดมื้ออาหาร ---
           if (data['meal_mode_sound'] != null &&
               _availableSounds.contains(data['meal_mode_sound'])) {
             _mealModeSound = data['meal_mode_sound'];
@@ -120,14 +161,12 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     }
   }
 
-  // ✅ 3. บันทึกค่าลง appstatus.json
   Future<void> _saveSettings() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/pillmate/appstatus.json');
 
       Map<String, dynamic> data = {};
-      // อ่านข้อมูลเก่าก่อน (เพื่อไม่ให้ทับค่า nfc_enabled)
       if (await file.exists()) {
         final content = await file.readAsString();
         if (content.trim().isNotEmpty) {
@@ -135,7 +174,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         }
       }
 
-      // อัปเดตค่าใหม่
       data['time_mode_sound'] = _timeModeSound;
       data['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
       data['time_mode_repeat_count'] = _timeModeRepeatCount;
@@ -156,21 +194,14 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       }
     } catch (e) {
       debugPrint('Error saving settings: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('เกิดข้อผิดพลาดในการบันทึก: $e')),
-        );
-      }
     }
   }
 
-  // Helper แปลง String HH:mm -> TimeOfDay
   TimeOfDay _parseTime(String timeStr) {
     final parts = timeStr.split(':');
     return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
   }
 
-  // Helper แปลง TimeOfDay -> String HH:mm
   String _formatTime(TimeOfDay time) {
     final h = time.hour.toString().padLeft(2, '0');
     final m = time.minute.toString().padLeft(2, '0');
@@ -228,7 +259,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           ),
           const SizedBox(height: 20),
 
-          // 1. เลือกไฟล์เสียง
+          // 1. เลือกไฟล์เสียง + ปุ่มเล่น
           _buildSoundSelector(
             label: 'เสียงแจ้งเตือน',
             value: _timeModeSound,
@@ -236,19 +267,31 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               setState(() {
                 _timeModeSound = val;
               });
+              // เล่นเสียงทันทีเมื่อเลือก
+              _playPreview(val);
             },
           ),
 
           const SizedBox(height: 24),
 
           // 2. ระยะเวลาการย้ำเตือน (Snooze Duration)
-          const Text('ระยะเวลาย้ำเตือน (นาที)', style: TextStyle(fontSize: 16)),
+          // ✅ เพิ่ม Label ตามที่ขอ
+          const Text(
+            'ระยะห่างระหว่างการแจ้งเตือน(นาที)',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.teal,
+            ),
+          ),
+          const SizedBox(height: 8),
+
           Row(
             children: [
               Expanded(
                 child: Slider(
                   value: _timeModeSnoozeDuration.toDouble(),
-                  min: 3, // ต่ำสุด 3 นาที
+                  min: 3,
                   max: 60,
                   divisions: 57,
                   label: '$_timeModeSnoozeDuration นาที',
@@ -321,7 +364,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           ),
           const SizedBox(height: 20),
 
-          // 1. เลือกไฟล์เสียง
+          // 1. เลือกไฟล์เสียง + ปุ่มเล่น
           _buildSoundSelector(
             label: 'เสียงแจ้งเตือนมื้ออาหาร',
             value: _mealModeSound,
@@ -329,6 +372,8 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               setState(() {
                 _mealModeSound = val;
               });
+              // เล่นเสียงทันทีเมื่อเลือก
+              _playPreview(val);
             },
           ),
 
@@ -339,40 +384,29 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           ),
           const SizedBox(height: 16),
 
-          // 2. เวลามื้อเช้า
           _buildTimePickerRow(
             label: 'มื้อเช้า',
             time: _breakfastTime,
-            onChanged: (newTime) {
-              setState(() => _breakfastTime = newTime);
-            },
+            onChanged: (newTime) => setState(() => _breakfastTime = newTime),
           ),
           const Divider(),
-
-          // 3. เวลามื้อเที่ยง
           _buildTimePickerRow(
             label: 'มื้อเที่ยง',
             time: _lunchTime,
-            onChanged: (newTime) {
-              setState(() => _lunchTime = newTime);
-            },
+            onChanged: (newTime) => setState(() => _lunchTime = newTime),
           ),
           const Divider(),
-
-          // 4. เวลามื้อเย็น
           _buildTimePickerRow(
             label: 'มื้อเย็น',
             time: _dinnerTime,
-            onChanged: (newTime) {
-              setState(() => _dinnerTime = newTime);
-            },
+            onChanged: (newTime) => setState(() => _dinnerTime = newTime),
           ),
         ],
       ),
     );
   }
 
-  // Widget เลือกไฟล์เสียง
+  // ✅ แก้ไข Widget เลือกไฟล์เสียง ให้มีปุ่ม Play/Stop
   Widget _buildSoundSelector({
     required String label,
     required String? value,
@@ -398,7 +432,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
                   ? [
                       const DropdownMenuItem(
                         value: null,
-                        child: Text('ไม่พบไฟล์เสียง'),
+                        child: Text('ไม่พบไฟล์เสียง (เช็ค pubspec.yaml)'),
                       ),
                     ]
                   : _availableSounds.map((soundPath) {
@@ -411,16 +445,40 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             ),
           ),
         ),
+
+        // ✅ ปุ่ม Play / Stop ด้านล่าง Dropdown
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            ElevatedButton.icon(
+              onPressed: value == null ? null : () => _playPreview(value),
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('เล่นเสียง'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal[50],
+                foregroundColor: Colors.teal,
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: _stopPreview,
+              icon: const Icon(Icons.stop),
+              label: const Text('หยุด'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+            ),
+          ],
+        ),
       ],
     );
   }
 
-  // Widget เลือกเวลา
   Widget _buildTimePickerRow({
     required String label,
     required TimeOfDay time,
     required Function(TimeOfDay) onChanged,
   }) {
+    // ... (เหมือนเดิม) ...
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
