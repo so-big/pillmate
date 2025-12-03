@@ -983,7 +983,8 @@ class _DashboardPageState extends State<DashboardPage> {
         borderRadius: BorderRadius.circular(12),
         // ✅ Logic การแตะ: อ่านไฟล์สถานะล่าสุดก่อนทำงานเสมอ
         onTap: () async {
-          if (isTaken) return;
+          if (isTaken)
+            return; // ถ้ากินแล้ว แตะธรรมดาไม่ต้องทำอะไร (รอ Long Press)
 
           // 1. อ่านสถานะ NFC ล่าสุดจากไฟล์
           final realTimeNfcStatus = await _getNfcStatusFromFile();
@@ -1007,28 +1008,44 @@ class _DashboardPageState extends State<DashboardPage> {
             );
           }
         },
-        // ✅ Logic การกดค้าง (สำหรับ Manual Mode)
+        // ✅ Logic การกดค้าง (สำหรับ Manual Mode และ เพิ่ม Clear Taken Logic)
         onTapDown: (_) {
-          if (isTaken) return;
+          // ไม่ return แล้ว ถ้า isTaken เป็น true เพื่อให้เข้าสู่ Timer Logic
 
           // เริ่มจับเวลา 2 วินาที
-          _manualHoldTimer = Timer(const Duration(seconds: 2), () async {
-            // เมื่อครบ 2 วินาที ตรวจสอบสถานะจากไฟล์อีกครั้งเพื่อความชัวร์
-            final realTimeNfcStatus = await _getNfcStatusFromFile();
-            if (mounted) {
-              setState(() {
-                _isNfcEnabled = realTimeNfcStatus;
-              });
-            }
+          _manualHoldTimer = Timer(const Duration(seconds: 1), () async {
+            if (isTaken) {
+              // ----------------------------------------------------------
+              // ✨ NEW: ถ้ากินแล้ว ให้เรียกฟังก์ชันยกเลิก (ต้องใส่ Password)
+              // ----------------------------------------------------------
+              if (!mounted) return;
 
-            // ถ้ายังเป็นโหมด Manual (ปิด NFC) ให้บันทึก
-            if (!realTimeNfcStatus) {
-              await _markDoseTaken(r, item.time);
+              // เรียก Dialog ยืนยันการลบ (ต้องใส่ password ตามโค้ดเดิม)
+              final ok = await _showClearTakenConfirmDialog();
+              if (ok == true) {
+                await _clearTakenForReminder(r, item.time);
+              }
+            } else {
+              // ----------------------------------------------------------
+              // ✨ OLD: ถ้ายันไม่กิน ให้ยืนยันการกิน (Manual Mode)
+              // ----------------------------------------------------------
+              // เมื่อครบ 2 วินาที ตรวจสอบสถานะจากไฟล์อีกครั้งเพื่อความชัวร์
+              final realTimeNfcStatus = await _getNfcStatusFromFile();
               if (mounted) {
-                await _showAutoDismissDialog(
-                  'บันทึกสำเร็จ',
-                  'ยืนยันการกินยาเรียบร้อยแล้ว (Manual Mode)',
-                );
+                setState(() {
+                  _isNfcEnabled = realTimeNfcStatus;
+                });
+              }
+
+              // ถ้ายังเป็นโหมด Manual (ปิด NFC) ให้บันทึก
+              if (!realTimeNfcStatus) {
+                await _markDoseTaken(r, item.time);
+                if (mounted) {
+                  await _showAutoDismissDialog(
+                    'บันทึกสำเร็จ',
+                    'ยืนยันการกินยาเรียบร้อยแล้ว (Manual Mode)',
+                  );
+                }
               }
             }
           });
@@ -1124,7 +1141,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          isTaken ? 'กินแล้ว (ยืนยันด้วย NFC)' : 'ยังไม่ได้กิน',
+                          isTaken ? 'กินแล้ว' : 'ยังไม่ได้กิน',
                           style: TextStyle(
                             fontSize: 13,
                             color: isTaken
@@ -1140,9 +1157,11 @@ class _DashboardPageState extends State<DashboardPage> {
                     const SizedBox(height: 4),
                     // คำอธิบายเปลี่ยนตามโหมด
                     Text(
-                      _isNfcEnabled
-                          ? 'แตะการ์ดเพื่อสแกน NFC ยา'
-                          : 'กดค้างไว้ 2 วินาที เพื่อยืนยันการกินยา',
+                      isTaken
+                          ? 'กดค้างไว้ 2 วินาที เพื่อยกเลิกสถานะ' // เพิ่ม Hint สำหรับกรณีที่กินแล้ว
+                          : (_isNfcEnabled
+                                ? 'แตะการ์ดเพื่อสแกน NFC ยา'
+                                : 'กดค้างไว้ 2 วินาที เพื่อยืนยันการกินยา'),
                       style: const TextStyle(
                         fontSize: 11,
                         color: Colors.black38,
