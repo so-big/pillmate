@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-// import 'package:flutter/services.dart'; // ไม่ใช้แล้ว
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 
@@ -23,12 +22,11 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   // ✅ 1. รายชื่อไฟล์เสียง (Hardcode ตามชื่อไฟล์จริง)
-  // ⚠️ สำคัญ: ชื่อตรงนี้ต้องตรงกับชื่อไฟล์ใน assets/sound_norti/ ทุกตัวอักษร
   final List<String> _availableSounds = const [
     'assets/sound_norti/01_clock_alarm_normal_30_sec.mp3', // ⬅️ เริ่มที่ 01
     'assets/sound_norti/02_clock_alarm_normal_1_min.mp3',
     'assets/sound_norti/03_clock_alarm_normal_1.30_min.mp3',
-    'assets/sound_norti/04_clock_alarm_continue_30_sec.mp3', // *ย้ายขึ้นมา*
+    'assets/sound_norti/04_ clock_alarm_continue_30_sec.mp3', // *ย้ายขึ้นมา*
     'assets/sound_norti/05_clock_alarm_continue_1_min.mp3',
     'assets/sound_norti/06_clock_alarm_continue_1.30_min.mp3',
   ];
@@ -142,6 +140,9 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
 
   Future<void> _saveSettings() async {
     try {
+      // ⚠️ ก่อนบันทึกให้หยุดเสียง Preview ก่อน
+      await _audioPlayer.stop();
+
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/pillmate/appstatus.json');
 
@@ -188,7 +189,30 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   }
 
   String _getFileName(String path) {
+    // ตัด path ยาวๆ ให้เหลือแค่ชื่อไฟล์
     return path.split('/').last;
+  }
+
+  // ✅ NEW: Widget ปุ่มบันทึกขนาดเต็มจอ
+  Widget _buildSaveButton() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16.0),
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _saveSettings,
+        icon: const Icon(Icons.save),
+        label: const Text(
+          'บันทึกการตั้งค่า',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.teal,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      ),
+    );
   }
 
   @override
@@ -204,19 +228,16 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           title: const Text('ตั้งค่าการแจ้งเตือน'),
           backgroundColor: Colors.teal,
           bottom: const TabBar(
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            indicatorColor: Colors.white,
             tabs: [
               Tab(text: 'แจ้งเตือนตามเวลา'),
               Tab(text: 'แจ้งเตือนตามมื้ออาหาร'),
             ],
-            indicatorColor: Colors.white,
           ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.save),
-              onPressed: _saveSettings,
-              tooltip: 'บันทึก',
-            ),
-          ],
+          // ❌ ลบปุ่มบันทึกออกจาก AppBar actions
+          actions: const [],
         ),
         body: TabBarView(
           children: [_buildTimeModeView(), _buildMealModeView()],
@@ -323,6 +344,12 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               ),
             ),
           ),
+
+          // ✅ เพิ่มช่องว่างก่อนปุ่มบันทึก
+          const SizedBox(height: 32),
+
+          // ✅ NEW: ปุ่มบันทึก
+          _buildSaveButton(),
         ],
       ),
     );
@@ -377,6 +404,12 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             time: _dinnerTime,
             onChanged: (newTime) => setState(() => _dinnerTime = newTime),
           ),
+
+          // ✅ เพิ่มช่องว่างก่อนปุ่มบันทึก
+          const SizedBox(height: 32),
+
+          // ✅ NEW: ปุ่มบันทึก
+          _buildSaveButton(),
         ],
       ),
     );
