@@ -2,52 +2,77 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async'; // เพิ่มสำหรับการใช้ Stream
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart'; // ✅ สำคัญ: มาจากตัวอย่าง
 import 'package:path_provider/path_provider.dart';
-// ต้องเพิ่ม 2 package นี้ใน pubspec.yaml
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
-// 1. Initialize Plugin and Timezone
+// 1. ประกาศ Plugin
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-// Timezone location for scheduling (local)
-late tz.Location local;
+// Stream สำหรับจัดการการกด Notification (ตามตัวอย่าง)
+final StreamController<NotificationResponse> selectNotificationStream =
+    StreamController<NotificationResponse>.broadcast();
 
-// ฟังก์ชันนี้ต้องถูกเรียกครั้งเดียวในตอนเริ่มต้นแอปฯ (เช่น ใน main.dart)
+// 2. ฟังก์ชัน Initialize หลัก (เรียกใน main.dart)
 Future<void> initializeNotifications() async {
-  // 1. Initialize Timezone
-  tzdata.initializeTimeZones();
-  try {
-    local = tz.local;
-  } catch (e) {
-    debugPrint(
-      'Error setting local timezone. Falling back to Asia/Bangkok: $e',
-    );
-    local = tz.getLocation('Asia/Bangkok');
-  }
+  // 2.1 ตั้งค่า Timezone ให้ถูกต้องตามตัวอย่างเป๊ะๆ
+  await _configureLocalTimeZone();
 
-  // 2. Initialize platform specific settings
+  // 2.2 ตั้งค่า Android
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
 
-  const InitializationSettings initializationSettings = InitializationSettings(
+  // 2.3 ตั้งค่า iOS/macOS (ตามตัวอย่างแต่ตัดให้สั้นลงเท่าที่จำเป็น)
+  final DarwinInitializationSettings initializationSettingsDarwin =
+      DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
+
+  final InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
+    iOS: initializationSettingsDarwin,
+    macOS: initializationSettingsDarwin,
   );
 
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  // 2.4 Initialize Plugin
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse:
+        (NotificationResponse notificationResponse) {
+          selectNotificationStream.add(notificationResponse);
+        },
+  );
 
-  debugPrint('Notification Plugin Initialized: Timezone is ${local.name}');
+  debugPrint('Notification Plugin Initialized & Timezone Configured');
 }
 
-// 2. Helper เพื่ออ่านค่าการตั้งค่าจาก appstatus.json
-Future<Map<String, dynamic>> _loadNotificationSettings() async {
-  // Default Raw Resource Name สำหรับเสียง Fallback
-  const String defaultRawSoundName = '01_clock_alarm_normal_30_sec';
+// ✅ ฟังก์ชันตั้งค่า Timezone (คัดลอก Logic มาจากตัวอย่างที่ท่านให้)
+Future<void> _configureLocalTimeZone() async {
+  if (kIsWeb || Platform.isLinux) {
+    return;
+  }
+  tzdata.initializeTimeZones();
 
+  // ใช้ flutter_timezone ดึงค่า Timezone ของเครื่องจริงๆ
+  final String timeZoneName = await FlutterTimezone.getLocalTimezone();
+
+  // Set ค่า local location ให้ระบบรู้ว่าตอนนี้อยู่ Timezone ไหน
+  tz.setLocalLocation(tz.getLocation(timeZoneName));
+  debugPrint('Local Timezone set to: $timeZoneName');
+}
+
+// Helper อ่านค่า settings (เหมือนเดิม)
+Future<Map<String, dynamic>> _loadNotificationSettings() async {
+  const String defaultRawSoundName = '01_clock_alarm_normal_30_sec';
   try {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/pillmate/appstatus.json');
@@ -55,31 +80,22 @@ Future<Map<String, dynamic>> _loadNotificationSettings() async {
     if (await file.exists()) {
       final content = await file.readAsString();
       final data = jsonDecode(content) as Map<String, dynamic>;
-
-      // ⚠️ Note: ตอนนี้เราคาดหวังว่า time_mode_sound เป็นชื่อ Raw Resource ล้วนๆ
       String loadedSoundName =
           data['time_mode_sound']?.toString().toLowerCase() ??
           defaultRawSoundName;
 
-      // ตรวจสอบความถูกต้องของชื่อ Raw Resource Name (ควรไม่มีนามสกุลและ Path)
       if (loadedSoundName.contains('.') || loadedSoundName.contains('/')) {
-        debugPrint(
-          'Warning: Loaded sound name contains invalid characters/path. Falling back to default.',
-        );
         loadedSoundName = defaultRawSoundName;
       }
-
       return {
         'snoozeDuration': (data['time_mode_snooze_duration'] as int? ?? 2),
         'repeatCount': (data['time_mode_repeat_count'] as int? ?? 1),
-        // ✅ ดึงชื่อ Raw Resource Name มาเลย
         'rawResourceName': loadedSoundName,
       };
     }
   } catch (e) {
-    debugPrint('Error loading appstatus.json settings for notification: $e');
+    debugPrint('Error loading settings: $e');
   }
-  // Fallback to default (2 mins, 1 repeat) และ Raw Sound Name Default
   return {
     'snoozeDuration': 2,
     'repeatCount': 1,
@@ -87,64 +103,58 @@ Future<Map<String, dynamic>> _loadNotificationSettings() async {
   };
 }
 
-// 3. ฟังก์ชันหลักสำหรับตั้งเวลาแจ้งเตือน
+// 3. ฟังก์ชันหลักสำหรับตั้งแจ้งเตือน
 void scheduleNotificationForNewAlert() async {
   debugPrint('\n=============================================================');
-  debugPrint('🔔🔔🔔 NOTIFICATION SERVICE TRIGGERED! (ทำงานแล้วนะ) 🔔🔔🔔');
+  debugPrint('🔔🔔🔔 NOTIFICATION SERVICE TRIGGERED! (FIXED VERSION) 🔔🔔🔔');
 
-  // 3.1. โหลดค่าตั้งค่า (รองรับ dynamic)
+  // โหลด Settings
   final settings = await _loadNotificationSettings();
-  final int snoozeDuration = settings['snoozeDuration'] as int; // 2 นาที
-  final int repeatCount =
-      settings['repeatCount'] as int; // 1 ครั้ง (รวมครั้งแรกเป็น 2)
-  final String rawResourceName =
-      settings['rawResourceName'] as String; // ชื่อไฟล์เสียง Raw Resource
+  final int snoozeDuration = settings['snoozeDuration'] as int;
+  final int repeatCount = settings['repeatCount'] as int;
+  // ใช้เสียง default ก่อนเพื่อทดสอบความชัวร์ (ถ้าอยากใช้ custom ให้แก้ตรงนี้)
+  // final String rawResourceName = settings['rawResourceName'] as String;
 
-  debugPrint(
-    '--- Settings Loaded: Snooze $snoozeDuration mins, Repeat $repeatCount times, Raw Sound: $rawResourceName ---',
-  );
+  // ✅ ใช้ tz.TZDateTime.now(tz.local) ตามตัวอย่าง เพื่อให้ได้เวลาปัจจุบันที่ถูกต้องแน่นอน
+  final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
 
-  // 3.2. กำหนดเวลาแจ้งเตือนเป้าหมาย: 10:43 AM Today
-  final DateTime now = DateTime.now();
-
-  // สร้าง DateTime ของ 10:43 น. วันนี้
-  DateTime targetTime = DateTime(
+  // ตั้งเป้าหมาย 11:03 ของวันนี้
+  tz.TZDateTime targetTime = tz.TZDateTime(
+    tz.local,
     now.year,
     now.month,
     now.day,
-    10,
-    43, // ✅ แก้เป็น 43 แล้ว
+    11,
+    3,
   );
 
-  // หาก 10:43 น. ได้ผ่านไปแล้ว (เพื่อป้องกันการแจ้งเตือนล้มเหลว) ให้เลื่อนไปเป็นพรุ่งนี้
+  debugPrint('Current Time (Local): $now');
+  debugPrint('Initial Target Time: $targetTime');
+
+  // ⭐️ LOGIC ทดสอบ: ถ้าเลยเวลาแล้ว ให้ตั้งเตือนในอีก 5 วินาที ⭐️
   if (targetTime.isBefore(now)) {
-    targetTime = targetTime.add(const Duration(days: 1));
+    targetTime = now.add(const Duration(seconds: 5));
     debugPrint(
-      'Target time (10:43) has passed. Scheduling for tomorrow: $targetTime',
+      '>>> Time passed! Rescheduling for 5 seconds from now: $targetTime',
     );
+  } else {
+    debugPrint('>>> Scheduling for today at: $targetTime');
   }
 
-  // แปลงเป็น TimeZone object
-  tz.TZDateTime scheduledTZTime = tz.TZDateTime.from(targetTime, local);
-
-  // 3.3. ตั้งเวลาแจ้งเตือนตามลำดับ (i=0 คือครั้งแรก, i>0 คือการย้ำ)
   for (int i = 0; i <= repeatCount; i++) {
-    // คำนวณเวลาแจ้งเตือนครั้งที่ i
-    final tz.TZDateTime currentScheduleTime = scheduledTZTime.add(
+    final tz.TZDateTime currentScheduleTime = targetTime.add(
       Duration(minutes: i * snoozeDuration),
     );
 
-    // Safety check: ข้ามการตั้งเวลาถ้าเวลาผ่านไปแล้ว (ป้องกันการแจ้งเตือนทันทีในอดีต)
-    if (currentScheduleTime.isBefore(tz.TZDateTime.now(local))) {
-      debugPrint('Skipping past schedule: $currentScheduleTime');
+    // เช็คว่าเวลายังไม่ผ่านไป (เผื่อ Loop)
+    if (currentScheduleTime.isBefore(now)) {
       continue;
     }
 
-    // ID ต้องไม่ซ้ำกัน
-    // ใช้เวลาปัจจุบันของ currentScheduleTime เพื่อให้ ID ไม่ซ้ำกันในการวนลูป
-    final int notificationId = currentScheduleTime.millisecondsSinceEpoch;
+    // ✅ แก้ ID overflow ตามหลักการ Bitwise
+    final int notificationId =
+        (currentScheduleTime.millisecondsSinceEpoch ~/ 1000) & 0x7FFFFFFF;
 
-    // รายละเอียดการแจ้งเตือน
     final NotificationDetails notificationDetails = NotificationDetails(
       android: AndroidNotificationDetails(
         'pillmate_id',
@@ -153,40 +163,28 @@ void scheduleNotificationForNewAlert() async {
         importance: Importance.max,
         priority: Priority.high,
         ticker: 'ticker',
-        sound: RawResourceAndroidNotificationSound(
-          rawResourceName, // ✅ ใช้ตัวแปร Raw Resource Name ที่ดึงจาก JSON
-        ),
+        // sound: RawResourceAndroidNotificationSound(rawResourceName), // เปิดบรรทัดนี้ถ้าจะใช้เสียง Custom
       ),
     );
 
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-      notificationId,
-      'ถึงเวลานัดทานยา! (ครั้งที่ ${i + 1})', // i=0 จะเป็นครั้งที่ 1
-      'โปรดตรวจสอบยาที่ต้องทาน ณ เวลา ${currentScheduleTime.hour.toString().padLeft(2, '0')}:${currentScheduleTime.minute.toString().padLeft(2, '0')} (ย้ำทุก ${snoozeDuration} นาที)',
-      currentScheduleTime,
-      notificationDetails,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-    );
+    try {
+      // ✅ ใช้ zonedSchedule ตามตัวอย่าง
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        notificationId,
+        'ถึงเวลานัดทานยา! (ครั้งที่ ${i + 1})',
+        'ทดสอบแจ้งเตือนเวลา ${currentScheduleTime.hour}:${currentScheduleTime.minute.toString().padLeft(2, '0')}:${currentScheduleTime.second}',
+        currentScheduleTime,
+        notificationDetails,
+        // ✅ ตั้งค่าตามตัวอย่าง: absoluteTime และ exactAllowWhileIdle
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
 
-    debugPrint(
-      'ตั้งแจ้งเตือน #$notificationId (ครั้งที่ ${i + 1}) ที่เวลา: $currentScheduleTime',
-    );
+      debugPrint('✅ Scheduled ID:$notificationId at $currentScheduleTime');
+    } catch (e) {
+      debugPrint('❌ Error scheduling notification: $e');
+    }
   }
-
   debugPrint('=============================================================\n');
 }
-
-// **สิ่งที่ต้องทำเพิ่มเติมที่สำคัญ:**
-// 1. เพิ่ม dependency ใน pubspec.yaml: flutter_local_notifications, timezone, path_provider
-// 2. ⭐️ แก้ไข main.dart เพื่อแก้ไขข้อผิดพลาด LateInitializationError: ⭐️
-//    ให้ไปที่ไฟล์ main.dart และเปลี่ยน main() เป็นแบบนี้:
-/*
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); 
-  await initializeNotifications(); // ต้องรอให้เสร็จก่อน
-  runApp(const MyApp());
-}
-*/
-// 3. ตรวจสอบว่าไฟล์เสียงถูกวางใน android/app/src/main/res/raw/ และใช้ชื่อ Raw Resource Name ที่ถูกต้อง

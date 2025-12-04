@@ -12,8 +12,11 @@ import 'forgotPassword.dart';
 import 'create_account.dart';
 import 'view_dashboard.dart';
 import 'database_helper.dart';
+import 'nortification_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeNotifications();
   runApp(const MyApp());
 }
 
