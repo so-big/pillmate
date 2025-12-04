@@ -44,7 +44,10 @@ Future<void> initializeNotifications() async {
 }
 
 // 2. Helper เพื่ออ่านค่าการตั้งค่าจาก appstatus.json
-Future<Map<String, int>> _loadNotificationSettings() async {
+Future<Map<String, dynamic>> _loadNotificationSettings() async {
+  // Default Raw Resource Name สำหรับเสียง Fallback
+  const String defaultRawSoundName = '01_clock_alarm_normal_30_sec';
+
   try {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/pillmate/appstatus.json');
@@ -53,17 +56,35 @@ Future<Map<String, int>> _loadNotificationSettings() async {
       final content = await file.readAsString();
       final data = jsonDecode(content) as Map<String, dynamic>;
 
-      // ดึงค่าตาม Key ที่เราแก้ไขไปในขั้นตอนก่อนหน้า
+      // ⚠️ Note: ตอนนี้เราคาดหวังว่า time_mode_sound เป็นชื่อ Raw Resource ล้วนๆ
+      String loadedSoundName =
+          data['time_mode_sound']?.toString().toLowerCase() ??
+          defaultRawSoundName;
+
+      // ตรวจสอบความถูกต้องของชื่อ Raw Resource Name (ควรไม่มีนามสกุลและ Path)
+      if (loadedSoundName.contains('.') || loadedSoundName.contains('/')) {
+        debugPrint(
+          'Warning: Loaded sound name contains invalid characters/path. Falling back to default.',
+        );
+        loadedSoundName = defaultRawSoundName;
+      }
+
       return {
         'snoozeDuration': (data['time_mode_snooze_duration'] as int? ?? 2),
         'repeatCount': (data['time_mode_repeat_count'] as int? ?? 1),
+        // ✅ ดึงชื่อ Raw Resource Name มาเลย
+        'rawResourceName': loadedSoundName,
       };
     }
   } catch (e) {
     debugPrint('Error loading appstatus.json settings for notification: $e');
   }
-  // Fallback to default (2 mins, 1 repeat)
-  return {'snoozeDuration': 2, 'repeatCount': 1};
+  // Fallback to default (2 mins, 1 repeat) และ Raw Sound Name Default
+  return {
+    'snoozeDuration': 2,
+    'repeatCount': 1,
+    'rawResourceName': defaultRawSoundName,
+  };
 }
 
 // 3. ฟังก์ชันหลักสำหรับตั้งเวลาแจ้งเตือน
@@ -71,33 +92,35 @@ void scheduleNotificationForNewAlert() async {
   debugPrint('\n=============================================================');
   debugPrint('🔔🔔🔔 NOTIFICATION SERVICE TRIGGERED! (ทำงานแล้วนะ) 🔔🔔🔔');
 
-  // 3.1. โหลดค่าตั้งค่า
+  // 3.1. โหลดค่าตั้งค่า (รองรับ dynamic)
   final settings = await _loadNotificationSettings();
-  final int snoozeDuration = settings['snoozeDuration']!; // 2 นาที
+  final int snoozeDuration = settings['snoozeDuration'] as int; // 2 นาที
   final int repeatCount =
-      settings['repeatCount']!; // 1 ครั้ง (รวมครั้งแรกเป็น 2)
+      settings['repeatCount'] as int; // 1 ครั้ง (รวมครั้งแรกเป็น 2)
+  final String rawResourceName =
+      settings['rawResourceName'] as String; // ชื่อไฟล์เสียง Raw Resource
 
   debugPrint(
-    '--- Settings Loaded: Snooze $snoozeDuration mins, Repeat $repeatCount times ---',
+    '--- Settings Loaded: Snooze $snoozeDuration mins, Repeat $repeatCount times, Raw Sound: $rawResourceName ---',
   );
 
-  // 3.2. กำหนดเวลาแจ้งเตือนเป้าหมาย: 10:25 AM Today (อัพเดตแล้ว)
+  // 3.2. กำหนดเวลาแจ้งเตือนเป้าหมาย: 10:43 AM Today
   final DateTime now = DateTime.now();
 
-  // สร้าง DateTime ของ 10:25 น. วันนี้
+  // สร้าง DateTime ของ 10:43 น. วันนี้
   DateTime targetTime = DateTime(
     now.year,
     now.month,
     now.day,
     10,
-    29,
-  ); // ✅ แก้เป็น 25 แล้ว
+    43, // ✅ แก้เป็น 43 แล้ว
+  );
 
-  // หาก 10:25 น. ได้ผ่านไปแล้ว (เพื่อป้องกันการแจ้งเตือนล้มเหลว) ให้เลื่อนไปเป็นพรุ่งนี้
+  // หาก 10:43 น. ได้ผ่านไปแล้ว (เพื่อป้องกันการแจ้งเตือนล้มเหลว) ให้เลื่อนไปเป็นพรุ่งนี้
   if (targetTime.isBefore(now)) {
     targetTime = targetTime.add(const Duration(days: 1));
     debugPrint(
-      'Target time (10:25) has passed. Scheduling for tomorrow: $targetTime', // ✅ อัพเดตข้อความ
+      'Target time (10:43) has passed. Scheduling for tomorrow: $targetTime',
     );
   }
 
@@ -118,10 +141,11 @@ void scheduleNotificationForNewAlert() async {
     }
 
     // ID ต้องไม่ซ้ำกัน
+    // ใช้เวลาปัจจุบันของ currentScheduleTime เพื่อให้ ID ไม่ซ้ำกันในการวนลูป
     final int notificationId = currentScheduleTime.millisecondsSinceEpoch;
 
     // รายละเอียดการแจ้งเตือน
-    const NotificationDetails notificationDetails = NotificationDetails(
+    final NotificationDetails notificationDetails = NotificationDetails(
       android: AndroidNotificationDetails(
         'pillmate_id',
         'Pillmate Reminders',
@@ -130,7 +154,7 @@ void scheduleNotificationForNewAlert() async {
         priority: Priority.high,
         ticker: 'ticker',
         sound: RawResourceAndroidNotificationSound(
-          '01_clock_alarm_normal_30_sec',
+          rawResourceName, // ✅ ใช้ตัวแปร Raw Resource Name ที่ดึงจาก JSON
         ),
       ),
     );
@@ -154,7 +178,15 @@ void scheduleNotificationForNewAlert() async {
   debugPrint('=============================================================\n');
 }
 
-// **สิ่งที่ต้องทำเพิ่มเติม**:
+// **สิ่งที่ต้องทำเพิ่มเติมที่สำคัญ:**
 // 1. เพิ่ม dependency ใน pubspec.yaml: flutter_local_notifications, timezone, path_provider
-// 2. เรียกใช้ `initializeNotifications()` ใน main.dart ก่อน runApp()
-// 3. ตรวจสอบว่า `01_clock_alarm_normal_30_sec.mp3` ถูกตั้งค่าเป็น Android Raw Resource ถูกต้อง
+// 2. ⭐️ แก้ไข main.dart เพื่อแก้ไขข้อผิดพลาด LateInitializationError: ⭐️
+//    ให้ไปที่ไฟล์ main.dart และเปลี่ยน main() เป็นแบบนี้:
+/*
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized(); 
+  await initializeNotifications(); // ต้องรอให้เสร็จก่อน
+  runApp(const MyApp());
+}
+*/
+// 3. ตรวจสอบว่าไฟล์เสียงถูกวางใน android/app/src/main/res/raw/ และใช้ชื่อ Raw Resource Name ที่ถูกต้อง

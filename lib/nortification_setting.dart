@@ -99,10 +99,31 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content) as Map<String, dynamic>;
 
-          if (data['time_mode_sound'] != null &&
-              _availableSounds.contains(data['time_mode_sound'])) {
-            _timeModeSound = data['time_mode_sound'];
+          // ⚠️ แก้ไข: เมื่อโหลดต้องใช้ List _availableSounds ในการตรวจสอบ (ซึ่งเก็บ path เต็ม)
+          // หากค่าที่โหลดมาเป็นชื่อ Raw Resource Name (ไม่มี path) จะต้องแปลงกลับเป็น path เต็ม
+          String? loadedSound = data['time_mode_sound']?.toString();
+
+          if (loadedSound != null) {
+            String fullPathMatch = _availableSounds.firstWhere(
+              // ลองหาจากชื่อ Raw Resource Name (ที่บันทึกใน JSON)
+              (path) => path.contains(loadedSound),
+              orElse: () => '',
+            );
+
+            if (fullPathMatch.isNotEmpty) {
+              _timeModeSound = fullPathMatch;
+            } else if (_availableSounds.contains(loadedSound)) {
+              // Fallback: ถ้าค่าที่โหลดมาเป็น Path เต็มอยู่แล้ว (อาจเป็นค่าเดิมก่อนแก้ไข)
+              _timeModeSound = loadedSound;
+            }
           }
+
+          // ตรวจสอบความถูกต้องของค่าที่โหลด
+          if (_timeModeSound == null ||
+              !_availableSounds.contains(_timeModeSound)) {
+            _timeModeSound = _availableSounds.first;
+          }
+
           if (data['time_mode_snooze_duration'] != null) {
             int val = data['time_mode_snooze_duration'];
             // ✅ เปลี่ยน Min validation: 3 -> 2
@@ -117,6 +138,17 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     } catch (e) {
       debugPrint('Error loading settings json: $e');
     }
+  }
+
+  // Helper function to extract Raw Resource Name
+  String _extractRawResourceName(String fullPath) {
+    // e.g. "assets/sound_norti/a01_clock_alarm_normal_30_sec.mp3"
+    final fileNameWithExtension = fullPath.split('/').last; // a01_...mp3
+    final parts = fileNameWithExtension.split('.');
+    if (parts.length > 1) {
+      parts.removeLast(); // Remove .mp3
+    }
+    return parts.join('.').toLowerCase(); // a01_..._30_sec
   }
 
   Future<void> _saveSettings() async {
@@ -135,7 +167,13 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         }
       }
 
-      data['time_mode_sound'] = _timeModeSound;
+      // ⭐️⭐️ NEW: บันทึกเฉพาะชื่อ Raw Resource Name ⭐️⭐️
+      if (_timeModeSound != null) {
+        data['time_mode_sound'] = _extractRawResourceName(_timeModeSound!);
+      } else {
+        data['time_mode_sound'] = null;
+      }
+
       data['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
       data['time_mode_repeat_count'] = _timeModeRepeatCount;
 
