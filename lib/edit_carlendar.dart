@@ -2,8 +2,8 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:async'; // เพิ่มเพื่อใช้ Timer
-import 'dart:ui'; // เพื่อใช้ PointerDeviceKind
+import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -11,7 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'create_profile.dart';
 import 'add_medicine.dart';
-import 'database_helper.dart'; // ✅ เรียกใช้ DatabaseHelper
+import 'database_helper.dart';
 
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:ndef/ndef.dart' as ndef;
@@ -55,10 +55,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
   bool _isSaving = false;
 
-  // ✅ ตัวแปรเก็บสถานะ NFC จาก json (Config App)
+  // Config App
   bool _isNfcEnabled = false;
 
-  // ✅ Database Helper Instance
+  // Database Helper Instance
   final dbHelper = DatabaseHelper();
 
   @override
@@ -84,15 +84,12 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     _notifyByTime = r['notifyByTime'] == true;
     _notifyByMeal = r['notifyByMeal'] == true;
 
-    // แปลง interval จากข้อมูลเดิม
     int intervalMinutes =
         int.tryParse(r['intervalMinutes']?.toString() ?? '') ?? 0;
-    // fallback ถ้าไม่มี minutes ลองดู hours (เผื่อข้อมูลเก่า)
     if (intervalMinutes <= 0) {
       final hours = int.tryParse(r['intervalHours']?.toString() ?? '') ?? 4;
       intervalMinutes = hours * 60;
     }
-    // ถ้ายัง 0 อีก ให้ default 4 ชม.
     if (intervalMinutes <= 0) {
       intervalMinutes = 4 * 60;
     }
@@ -105,10 +102,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
     _loadProfiles();
     _loadMedicines();
-    _loadNfcStatus(); // ✅ โหลดสถานะ NFC Config
+    _loadNfcStatus();
   }
 
-  // ✅ ฟังก์ชันโหลดสถานะ NFC จาก appstatus.json (ส่วนนี้ยังคงใช้ไฟล์เพราะเป็น Config เครื่อง)
   Future<void> _loadNfcStatus() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -136,8 +132,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     }
   }
 
-  // ---------- โหลดข้อมูลโปรไฟล์ / ยา จาก SQLite ----------
-
   Future<void> _loadProfiles() async {
     setState(() {
       _isLoadingProfiles = true;
@@ -147,7 +141,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       final db = await dbHelper.database;
       final profiles = <Map<String, dynamic>>[];
 
-      // 1. Master User
       final masterUser = await dbHelper.getUser(widget.username);
       if (masterUser != null) {
         profiles.add({
@@ -157,7 +150,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         });
       }
 
-      // 2. Sub-profiles
       final List<Map<String, dynamic>> subs = await db.query(
         'users',
         where: 'sub_profile = ?',
@@ -172,7 +164,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         });
       }
 
-      // ตรวจสอบ selection
       String? selected = _selectedProfileName;
       if (selected == null ||
           profiles.every((p) => p['name']?.toString() != selected)) {
@@ -250,8 +241,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     }
   }
 
-  // ---------- UI helper ----------
-
   Widget _buildProfileAvatar(dynamic imageData) {
     if (imageData == null || imageData.toString().isEmpty) {
       return const CircleAvatar(
@@ -318,7 +307,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
     await _loadMedicines();
 
-    // ถ้ามีการส่ง id กลับมา (เพิ่มยาสำเร็จ) ให้เลือกตัวนั้นเลย
     if (result is Map && result['id'] != null) {
       setState(() {
         _selectedMedicineId = result['id'].toString();
@@ -698,6 +686,21 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     return '$hour:$minute';
   }
 
+  // ✅ ฟังก์ชันช่วยตรวจสอบรหัสผ่าน
+  Future<bool> _verifyPassword(String inputPassword) async {
+    try {
+      final user = await dbHelper.getUser(widget.username);
+      if (user != null) {
+        if (user['password'] == inputPassword) {
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Verify password error: $e');
+    }
+    return false;
+  }
+
   // ---------- DELETE: ลบจาก SQLite ----------
 
   Future<void> _handleDelete() async {
@@ -712,37 +715,112 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       return;
     }
 
-    // ยืนยันก่อนลบ
+    // ✅ สร้าง Controller สำหรับช่องกรอกรหัสผ่าน
+    final passwordController = TextEditingController();
+    String? errorText;
+    bool isChecking = false;
+
+    // ✅ แสดง Dialog ยืนยันรหัสผ่าน (ใช้ StatefulBuilder เพื่ออัปเดตสถานะใน Dialog)
     final confirm = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
-        return AlertDialog(
-          title: const Text(
-            'ลบการแจ้งเตือนนี้ทั้งหมด?',
-            style: TextStyle(color: Colors.black87),
-          ),
-          content: const Text(
-            'การลบนี้จะลบข้อมูลการแจ้งเตือนของยานี้ออกจากระบบทั้งหมด\n'
-            'รวมถึงประวัติการกินยาที่เกี่ยวข้องด้วย',
-            style: TextStyle(color: Colors.black87),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('ยกเลิก'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('ลบ'),
-            ),
-          ],
+        return StatefulBuilder(
+          builder: (ctx, setStateDialog) {
+            return AlertDialog(
+              title: const Text(
+                'ยืนยันการลบ',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'การลบนี้จะทำให้ข้อมูลการแจ้งเตือนและประวัติการกินยาหายไปถาวร\nกรุณากรอกรหัสผ่านเพื่อยืนยัน',
+                    style: TextStyle(fontSize: 14, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.black),
+                    decoration: InputDecoration(
+                      labelText: 'รหัสผ่าน',
+                      labelStyle: const TextStyle(color: Colors.black54),
+                      errorText: errorText,
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isChecking
+                      ? null
+                      : () => Navigator.of(ctx).pop(false),
+                  child: const Text(
+                    'ยกเลิก',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: isChecking
+                      ? null
+                      : () async {
+                          final pwd = passwordController.text.trim();
+                          if (pwd.isEmpty) {
+                            setStateDialog(() {
+                              errorText = 'กรุณากรอกรหัสผ่าน';
+                            });
+                            return;
+                          }
+
+                          setStateDialog(() {
+                            isChecking = true;
+                            errorText = null;
+                          });
+
+                          // ตรวจสอบรหัสผ่าน
+                          final isCorrect = await _verifyPassword(pwd);
+
+                          if (isCorrect) {
+                            Navigator.of(
+                              ctx,
+                            ).pop(true); // รหัสถูก -> ปิด Dialog ส่งค่า true
+                          } else {
+                            setStateDialog(() {
+                              isChecking = false;
+                              errorText = 'รหัสผ่านไม่ถูกต้อง';
+                            });
+                          }
+                        },
+                  child: isChecking
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          'ลบข้อมูล',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
 
+    // ถ้าไม่ได้กด Confirm หรือปิดไปก่อน ให้หยุดทำงาน
     if (confirm != true) return;
 
+    // --- เริ่มกระบวนการลบ ---
     setState(() {
       _isSaving = true;
     });
@@ -914,12 +992,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         },
       );
 
-      // ถ้า user ยกเลิก dialog ไปแล้ว จะไม่ต้อง scan
-      // แต่ในโค้ด dialog ด้านบน รอ await ไม่ได้ return ค่า
-      // ต้อง check ว่าจะทำต่อไหม
-
       try {
-        // (Logic การเขียน NFC เหมือนเดิม)
         final availability = await FlutterNfcKit.nfcAvailability;
         if (availability != NFCAvailability.available) {
           throw 'อุปกรณ์นี้ไม่รองรับ NFC หรือยังไม่ได้เปิดใช้งาน';
@@ -1024,10 +1097,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         'et': et,
         'nfc_id': nfcTagId,
         'payload': payloadText,
-        'updated_at': now.toIso8601String(), // บันทึกเวลาที่อัปเดต
+        'updated_at': now.toIso8601String(),
       };
 
-      // Update Database Table 'calendar_alerts'
       await db.update(
         'calendar_alerts',
         row,
@@ -1045,7 +1117,6 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         _isSaving = false;
       });
 
-      // ส่งข้อมูลกลับ (Dashboard จะได้รับค่านี้ไปอัปเดต List)
       final result = {
         'id': reminderId,
         'createby': widget.username,
@@ -1586,4 +1657,3 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     );
   }
 }
-//
