@@ -81,17 +81,23 @@ void scheduleNotificationForNewAlert() async {
     '--- Settings Loaded: Snooze $snoozeDuration mins, Repeat $repeatCount times ---',
   );
 
-  // 3.2. กำหนดเวลาแจ้งเตือนเป้าหมาย: 10:17 AM Today
+  // 3.2. กำหนดเวลาแจ้งเตือนเป้าหมาย: 10:25 AM Today (อัพเดตแล้ว)
   final DateTime now = DateTime.now();
 
-  // สร้าง DateTime ของ 10:17 น. วันนี้
-  DateTime targetTime = DateTime(now.year, now.month, now.day, 10, 18);
+  // สร้าง DateTime ของ 10:25 น. วันนี้
+  DateTime targetTime = DateTime(
+    now.year,
+    now.month,
+    now.day,
+    10,
+    25,
+  ); // ✅ แก้เป็น 25 แล้ว
 
-  // หาก 10:17 น. ได้ผ่านไปแล้ว (เพื่อป้องกันการแจ้งเตือนล้มเหลว) ให้เลื่อนไปเป็นพรุ่งนี้
+  // หาก 10:25 น. ได้ผ่านไปแล้ว (เพื่อป้องกันการแจ้งเตือนล้มเหลว) ให้เลื่อนไปเป็นพรุ่งนี้
   if (targetTime.isBefore(now)) {
     targetTime = targetTime.add(const Duration(days: 1));
     debugPrint(
-      'Target time (10:17) has passed. Scheduling for tomorrow: $targetTime',
+      'Target time (10:25) has passed. Scheduling for tomorrow: $targetTime', // ✅ อัพเดตข้อความ
     );
   }
 
