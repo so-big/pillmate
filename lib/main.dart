@@ -4,9 +4,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // เพิ่มสำหรับ rootBundle
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:path_provider/path_provider.dart';
+
+// ✅ Import Plugin
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'forgotPassword.dart';
 import 'create_account.dart';
@@ -16,7 +19,55 @@ import 'nortification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 1. เริ่มต้นระบบแจ้งเตือน
   await initializeNotifications();
+
+  // ====================================================================
+  // ✅ NEW: ส่วนขออนุญาต (Permission) แก้ไขให้ถูกต้องสำหรับ v17+
+  // ====================================================================
+
+  // 1. ขออนุญาต Android
+  final androidImplementation = flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin
+      >();
+
+  if (androidImplementation != null) {
+    await androidImplementation.requestNotificationsPermission();
+  }
+
+  // 2. ขออนุญาต iOS (v17+ ยังใช้ IOSFlutterLocalNotificationsPlugin ในการ resolve ครับ)
+  final iosImplementation = flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin
+      >(); // ✅ ใช้ IOS... แทน Darwin...
+
+  if (iosImplementation != null) {
+    await iosImplementation.requestPermissions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+  }
+
+  // 3. (แถม) ขออนุญาต macOS (ถ้ามีแผนจะทำลง Mac ด้วย)
+  /*
+  final macosImplementation = flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+          MacOSFlutterLocalNotificationsPlugin>();
+          
+  if (macosImplementation != null) {
+    await macosImplementation.requestPermissions(
+      alert: true, 
+      badge: true, 
+      sound: true,
+    );
+  }
+  */
+
+  // ====================================================================
+
   runApp(const MyApp());
 }
 
@@ -55,7 +106,7 @@ class MyApp extends StatelessWidget {
         ),
       ),
 
-      // ✅ เพิ่ม localizations สำหรับภาษาไทยทั้งแอป
+      // ✅ localizations ภาษาไทย
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -82,14 +133,10 @@ class _LoginPageState extends State<LoginPage> {
   bool _rememberMe = false;
   bool _isLoading = false;
   String _message = '';
-
-  // เพิ่มตัวแปรเช็คความยาวรหัสผ่าน
   bool _isPasswordValid = false;
 
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-
-  // เรียกใช้ Database Helper
   final dbHelper = DatabaseHelper();
 
   Future<Directory> _appDir() async {
@@ -98,7 +145,6 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<File> _userStatFile() async {
     final dir = await _appDir();
-    // ตรวจสอบและสร้างโฟลเดอร์ pillmate ก่อน
     final pillmateDir = Directory('${dir.path}/pillmate');
     if (!(await pillmateDir.exists())) {
       await pillmateDir.create(recursive: true);
@@ -106,10 +152,8 @@ class _LoginPageState extends State<LoginPage> {
     return File('${dir.path}/pillmate/user-stat.json');
   }
 
-  // ✅ NEW: ฟังก์ชันสำหรับหา/สร้างไฟล์ appstatus.json
   Future<File> _appStatusFile() async {
     final dir = await _appDir();
-    // ตรวจสอบและสร้างโฟลเดอร์ pillmate ก่อน
     final pillmateDir = Directory('${dir.path}/pillmate');
     if (!(await pillmateDir.exists())) {
       await pillmateDir.create(recursive: true);
@@ -121,26 +165,19 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _passwordController.addListener(_validatePasswordLength);
-    // 🔔 เรียกใช้ฟังก์ชันเตรียมไฟล์สถานะก่อนโหลดข้อมูลอื่นๆ
     _initializeAppStatusFile();
     _loadRememberMeAndMaybeAutoLogin();
   }
 
-  // =========================================================================
-  // ✅ NEW: 1. ฟังก์ชันคัดลอกไฟล์ appstatus.json จาก assets
-  // =========================================================================
   Future<void> _initializeAppStatusFile() async {
     try {
       final appStatusFile = await _appStatusFile();
 
       if (!(await appStatusFile.exists())) {
         debugPrint('AppStatus file not found. Copying from assets...');
-        // โหลดเนื้อหาจาก assets
         final assetContent = await rootBundle.loadString(
           'assets/db/appstatus.json',
         );
-
-        // บันทึกเนื้อหาลงใน Application Documents Directory
         await appStatusFile.writeAsString(assetContent, flush: true);
         debugPrint(
           'AppStatus file copied successfully to: ${appStatusFile.path}',
@@ -148,7 +185,6 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       debugPrint('Error initializing appstatus.json: $e');
-      // ในกรณีที่ไฟล์ assets/db/appstatus.json ไม่มีอยู่จริง ให้แสดงข้อความเตือน
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -161,13 +197,9 @@ class _LoginPageState extends State<LoginPage> {
       }
     }
   }
-  // =========================================================================
 
-  // ✅ ฟังก์ชันตรวจสอบความยาวรหัสผ่าน
   void _validatePasswordLength() {
     setState(() {
-      // ต้องมากกว่า 7 ตัวอักษร (8 ตัวขึ้นไป) ถึงจะให้กดได้
-      // วิธีนี้จะกัน Child Profile ที่มีรหัสแค่ '-' (1 ตัวอักษร) ได้แน่นอน
       _isPasswordValid = _passwordController.text.length > 7;
     });
   }
@@ -190,10 +222,8 @@ class _LoginPageState extends State<LoginPage> {
               _passwordController.text = password;
             });
 
-            // ตรวจสอบความยาวรหัสผ่านหลังจากโหลด Auto Fill ด้วย
             _validatePasswordLength();
 
-            // ถ้ามี rememberMe จริง และ username/password ไม่ว่าง → auto login
             if (remember && username.isNotEmpty && password.isNotEmpty) {
               _handleLogin(auto: true);
             }
@@ -224,41 +254,31 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // --------------------------------------------------------------------------
-  // ดึงข้อมูล User จาก SQLite
-  // --------------------------------------------------------------------------
   Future<Map<String, dynamic>?> _findUser(
     String username,
     String password,
   ) async {
     try {
-      // 1. ดึงข้อมูล User จาก SQLite ตาม username
       final user = await dbHelper.getUser(username);
-
-      // 2. ถ้าไม่มี User หรือ รหัสผ่านไม่ตรงกัน
       if (user == null) {
         return null;
       }
-
-      // 3. เช็ครหัสผ่าน (user['password'] มาจาก SQLite)
       if (user['password'] == password) {
         return user;
       } else {
-        return null; // รหัสผิด
+        return null;
       }
     } catch (e) {
       debugPrint('Error reading from SQLite: $e');
       return null;
     }
   }
-  // --------------------------------------------------------------------------
 
   Future<void> _handleLogin({bool auto = false}) async {
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
 
     if (!auto) {
-      // ✅ เพิ่ม Logic กันเหนียว: ถ้ารหัสสั้นกว่า 8 ตัว ให้ return เลย (ถึงแม้ปุ่มจะกดไม่ได้ก็ตาม)
       if (password.length <= 7) {
         setState(() {
           _message = 'รหัสผ่านต้องมีความยาวมากกว่าหรือเท่ากับ 8 ตัวอักษร';
@@ -293,7 +313,6 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // ล็อกอินสำเร็จ → บันทึก rememberMe
     await _saveUserStat(
       username: username,
       password: password,
@@ -305,7 +324,6 @@ class _LoginPageState extends State<LoginPage> {
       _message = '';
     });
 
-    // ไปหน้า Dashboard
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -316,7 +334,6 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
-    // ✅ อย่าลืม remove listener
     _passwordController.removeListener(_validatePasswordLength);
     _usernameController.dispose();
     _passwordController.dispose();
@@ -326,7 +343,6 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Background Image/Gradient
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -341,11 +357,8 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                // Logo
                 Image.asset('assets/logo255x195.png', width: 255, height: 195),
                 const SizedBox(height: 20),
-
-                // App Title
                 Text(
                   'PILLMATE',
                   style: TextStyle(
@@ -356,8 +369,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 5),
-
-                // Tagline
                 Text(
                   'Your Health, Your Reminder.',
                   style: TextStyle(
@@ -367,8 +378,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // Username TextField
                 TextField(
                   controller: _usernameController,
                   style: const TextStyle(color: Colors.black),
@@ -382,8 +391,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Password TextField
                 TextField(
                   controller: _passwordController,
                   obscureText: true,
@@ -397,8 +404,6 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-
-                // Checkbox "Remember Me"
                 Padding(
                   padding: const EdgeInsets.only(top: 10.0, bottom: 10.0),
                   child: Row(
@@ -421,8 +426,6 @@ class _LoginPageState extends State<LoginPage> {
                     ],
                   ),
                 ),
-
-                // Status message
                 if (_message.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8.0),
@@ -435,16 +438,12 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
-
                 const SizedBox(height: 10),
-
-                // ✅ Login Button (แก้ไขให้เช็ค _isPasswordValid)
                 Container(
                   width: double.infinity,
                   height: 50,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
-                    // ถ้า Password ยังไม่ครบ 9 ตัว ให้เป็นสีเทา ถ้าครบแล้วให้เป็นสีเขียว
                     gradient: _isPasswordValid
                         ? const LinearGradient(
                             colors: [Color(0xFF90EE90), Color(0xFF32CD32)],
@@ -452,10 +451,7 @@ class _LoginPageState extends State<LoginPage> {
                             end: Alignment.centerRight,
                           )
                         : const LinearGradient(
-                            colors: [
-                              Colors.grey,
-                              Colors.grey,
-                            ], // สีปุ่ม Disable
+                            colors: [Colors.grey, Colors.grey, Colors.grey],
                             begin: Alignment.centerLeft,
                             end: Alignment.centerRight,
                           ),
@@ -468,12 +464,11 @@ class _LoginPageState extends State<LoginPage> {
                               offset: Offset(0, 3),
                             ),
                           ]
-                        : [], // ไม่มีเงาถ้าปุ่มกดไม่ได้
+                        : [],
                   ),
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
-                      // ถ้ากำลังโหลด หรือ รหัสผ่านไม่ถูกต้อง (สั้นเกินไป) ให้กดไม่ได้ (null)
                       onTap: (_isLoading || !_isPasswordValid)
                           ? null
                           : () => _handleLogin(auto: false),
@@ -493,7 +488,6 @@ class _LoginPageState extends State<LoginPage> {
                             : Text(
                                 'LOG IN',
                                 style: TextStyle(
-                                  // ถ้าปุ่ม Disable ให้ตัวหนังสือจางลงหน่อย
                                   color: _isPasswordValid
                                       ? Colors.white
                                       : Colors.white70,
@@ -506,8 +500,6 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-
-                // คำอธิบายเล็กๆ ใต้ปุ่ม (Optional: เพื่อบอก user ว่าทำไมกดไม่ได้)
                 if (!_isPasswordValid && _passwordController.text.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
@@ -516,10 +508,7 @@ class _LoginPageState extends State<LoginPage> {
                       style: TextStyle(color: Colors.grey[600], fontSize: 12),
                     ),
                   ),
-
                 const SizedBox(height: 25),
-
-                // Forgot Password and Create Account
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[

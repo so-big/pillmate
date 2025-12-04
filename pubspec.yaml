@@ -39,8 +39,8 @@ dependencies:
   image_picker: ^1.0.0
   flutter_nfc_kit: ^3.6.0
   ndef: ^0.3.0
-  flutter_local_notifications: ^17.1.2
-  timezone: ^0.9.2
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.10.0
   sqflite: ^2.3.0  # หรือเวอร์ชั่นล่าสุด
   path: ^1.9.0
   sqflite_common_ffi: ^2.3.0
@@ -74,9 +74,9 @@ flutter:
     - assets/pill/
     - assets/db/user  
     - assets/db/appstatus.json
-    - assets/sound_norti/A06_clock_alarm_continue_1.30_min.mp3
-    - assets/sound_norti/A05_clock_alarm_continue_1_min.mp3
-    - assets/sound_norti/A04_clock_alarm_continue_30_sec.mp3
-    - assets/sound_norti/A03_clock_alarm_normal_1.30_min.mp3
-    - assets/sound_norti/A02_clock_alarm_normal_1_min.mp3
-    - assets/sound_norti/A01_clock_alarm_normal_30_sec.mp3
+    - assets/sound_norti/a06_clock_alarm_continue_1.30_min.mp3
+    - assets/sound_norti/a05_clock_alarm_continue_1_min.mp3
+    - assets/sound_norti/a04_clock_alarm_continue_30_sec.mp3
+    - assets/sound_norti/a03_clock_alarm_normal_1.30_min.mp3
+    - assets/sound_norti/a02_clock_alarm_normal_1_min.mp3
+    - assets/sound_norti/a01_clock_alarm_normal_30_sec.mp3
