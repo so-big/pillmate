@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // เพิ่มสำหรับ rootBundle
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -92,19 +93,72 @@ class _LoginPageState extends State<LoginPage> {
     return getApplicationDocumentsDirectory();
   }
 
-  // ยังใช้ไฟล์นี้สำหรับเก็บสถานะ Remember Me เหมือนเดิม (แยกจาก Database หลัก)
   Future<File> _userStatFile() async {
     final dir = await _appDir();
+    // ตรวจสอบและสร้างโฟลเดอร์ pillmate ก่อน
+    final pillmateDir = Directory('${dir.path}/pillmate');
+    if (!(await pillmateDir.exists())) {
+      await pillmateDir.create(recursive: true);
+    }
     return File('${dir.path}/pillmate/user-stat.json');
+  }
+
+  // ✅ NEW: ฟังก์ชันสำหรับหา/สร้างไฟล์ appstatus.json
+  Future<File> _appStatusFile() async {
+    final dir = await _appDir();
+    // ตรวจสอบและสร้างโฟลเดอร์ pillmate ก่อน
+    final pillmateDir = Directory('${dir.path}/pillmate');
+    if (!(await pillmateDir.exists())) {
+      await pillmateDir.create(recursive: true);
+    }
+    return File('${dir.path}/pillmate/appstatus.json');
   }
 
   @override
   void initState() {
     super.initState();
-    // ✅ เพิ่ม Listener คอยฟังการพิมพ์รหัสผ่าน
     _passwordController.addListener(_validatePasswordLength);
+    // 🔔 เรียกใช้ฟังก์ชันเตรียมไฟล์สถานะก่อนโหลดข้อมูลอื่นๆ
+    _initializeAppStatusFile();
     _loadRememberMeAndMaybeAutoLogin();
   }
+
+  // =========================================================================
+  // ✅ NEW: 1. ฟังก์ชันคัดลอกไฟล์ appstatus.json จาก assets
+  // =========================================================================
+  Future<void> _initializeAppStatusFile() async {
+    try {
+      final appStatusFile = await _appStatusFile();
+
+      if (!(await appStatusFile.exists())) {
+        debugPrint('AppStatus file not found. Copying from assets...');
+        // โหลดเนื้อหาจาก assets
+        final assetContent = await rootBundle.loadString(
+          'assets/db/appstatus.json',
+        );
+
+        // บันทึกเนื้อหาลงใน Application Documents Directory
+        await appStatusFile.writeAsString(assetContent, flush: true);
+        debugPrint(
+          'AppStatus file copied successfully to: ${appStatusFile.path}',
+        );
+      }
+    } catch (e) {
+      debugPrint('Error initializing appstatus.json: $e');
+      // ในกรณีที่ไฟล์ assets/db/appstatus.json ไม่มีอยู่จริง ให้แสดงข้อความเตือน
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error: ไม่พบไฟล์ตั้งค่าเริ่มต้น (assets/db/appstatus.json): $e',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+  // =========================================================================
 
   // ✅ ฟังก์ชันตรวจสอบความยาวรหัสผ่าน
   void _validatePasswordLength() {

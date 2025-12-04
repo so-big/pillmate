@@ -72,6 +72,7 @@ flutter:
     - assets/simpleProfile/
     - assets/pill/
     - assets/db/user  
+    - assets/db/appstatus.json
     - assets/sound_norti/06_clock_alarm_continue_1.30_min.mp3
     - assets/sound_norti/05_clock_alarm_continue_1_min.mp3
     - assets/sound_norti/04_clock_alarm_continue_30_sec.mp3
