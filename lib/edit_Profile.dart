@@ -2,18 +2,20 @@
 
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui; // เพิ่ม import เพื่อใช้ ui.instantiateImageCodec
+import 'dart:ui' as ui; // ใช้ ui.instantiateImageCodec
+
+import 'package:flutter/cupertino.dart'; // ใช้ CupertinoPicker
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter/cupertino.dart'; // เพิ่ม import เพื่อใช้ CupertinoPicker
 
 // นำเข้า DatabaseHelper
 import 'database_helper.dart';
 
 class EditProfilePage extends StatefulWidget {
-  final String username; // Master username
-  final Map<String, dynamic> profile; // ข้อมูลโปรไฟล์ที่จะแก้
+  final String username; // Master username (เจ้าของบัญชีหลัก)
+  final Map<String, dynamic>
+  profile; // ข้อมูลโปรไฟล์ที่จะแก้ (อาจเป็น sub-profile)
 
   const EditProfilePage({
     super.key,
@@ -32,22 +34,20 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late TextEditingController _noteController;
 
   String? _customImageBase64;
-
   late String _originalProfileName;
-
   bool _isSaving = false;
 
-  // ✅ NEW: ตัวแปรเก็บเวลาอาหาร (ใช้เมื่อกำลังแก้ Master Profile เท่านั้น)
+  // ✅ ตัวแปรเก็บเวลาอาหาร
   String _breakfastTime = '06:00';
   String _lunchTime = '12:00';
   String _dinnerTime = '18:00';
 
+  // เช็คว่าเป็นบัญชีหลักหรือไม่ (ถ้าชื่อตรงกับ username ที่ login)
   bool get _isMasterProfile => _originalProfileName == widget.username;
 
-  // เรียกใช้ Database Helper
   final dbHelper = DatabaseHelper();
 
-  // 1. เพิ่มรายการรูปภาพต้นฉบับ (เหมือนหน้า Create Profile)
+  // รายการรูปภาพต้นฉบับ (Assets)
   final List<String> _avatarAssets = const [
     'assets/simpleProfile/profile_1.png',
     'assets/simpleProfile/profile_2.png',
@@ -56,7 +56,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     'assets/simpleProfile/profile_5.png',
     'assets/simpleProfile/profile_6.png',
   ];
-  int? _selectedAvatarIndex; // เก็บสถานะว่าเลือกรูปไหนอยู่ (ถ้าเลือกจาก asset)
+  int? _selectedAvatarIndex;
 
   @override
   void initState() {
@@ -73,34 +73,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _customImageBase64 = img;
     }
 
-    // ✅ NEW: ถ้าเป็น Master Profile ให้โหลดเวลาอาหารล่าสุดมาด้วย
-    if (_isMasterProfile) {
-      _loadMasterMealTimes();
-    }
-  }
-
-  // ✅ NEW: ฟังก์ชันโหลดเวลาอาหารของ Master Account
-  Future<void> _loadMasterMealTimes() async {
-    try {
-      final user = await dbHelper.getUser(widget.username);
-      if (user != null) {
-        if (mounted) {
-          setState(() {
-            _breakfastTime = user['breakfast']?.toString() ?? '06:00';
-            _lunchTime = user['lunch']?.toString() ?? '12:00';
-            _dinnerTime = user['dinner']?.toString() ?? '18:00';
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('EditProfile: Error loading master meal times: $e');
-    }
+    // ✅ โหลดเวลาอาหารจากโปรไฟล์นั้นๆ โดยตรง (รองรับทั้ง Master และ Sub-profile)
+    _breakfastTime = p['breakfast']?.toString() ?? '06:00';
+    _lunchTime = p['lunch']?.toString() ?? '12:00';
+    _dinnerTime = p['dinner']?.toString() ?? '18:00';
   }
 
   bool get _usingCustomImage =>
       _customImageBase64 != null && _customImageBase64!.isNotEmpty;
 
-  // 2. เพิ่มฟังก์ชันแปลง Asset เป็น Base64
+  // ฟังก์ชันแปลง Asset เป็น Base64
   Future<String> _loadAssetAsBase64(String assetPath) async {
     final byteData = await rootBundle.load(assetPath);
     final buffer = byteData.buffer;
@@ -111,13 +93,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return base64Encode(uint8list);
   }
 
-  // 3. เพิ่มฟังก์ชันเมื่อเลือกรูปจากรายการ Assets
+  // ฟังก์ชันเลือกรูปจากรายการ Assets
   Future<void> _selectAvatarFromAssets(int index) async {
     try {
       final base64 = await _loadAssetAsBase64(_avatarAssets[index]);
       setState(() {
         _selectedAvatarIndex = index;
-        _customImageBase64 = base64; // อัปเดตรูปที่จะบันทึกทันที
+        _customImageBase64 = base64;
       });
     } catch (e) {
       debugPrint('editProfile: load asset error: $e');
@@ -127,6 +109,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
+  // ฟังก์ชันเลือกรูปจาก Gallery
   Future<void> _pickCustomImage() async {
     try {
       final picker = ImagePicker();
@@ -139,8 +122,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       setState(() {
         _customImageBase64 = base64Str;
-        _selectedAvatarIndex =
-            null; // ถ้าเลือกจาก gallery ให้ยกเลิกการเลือก asset
+        _selectedAvatarIndex = null;
       });
     } catch (e) {
       debugPrint('editProfile: pick image error: $e');
@@ -151,6 +133,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
+  // Widget แสดงรูป Preview
   Widget _buildAvatarPreview() {
     if (_usingCustomImage) {
       try {
@@ -181,11 +164,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
+  // ตรวจสอบรหัสผ่าน (Master Password)
   Future<bool> _verifyPassword(String inputPassword) async {
     try {
       final user = await dbHelper.getUser(widget.username);
       if (user != null) {
-        // ดึงรหัสผ่านของ master user (widget.username)
         if (user['password'] == inputPassword) {
           return true;
         }
@@ -196,6 +179,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return false;
   }
 
+  // Dialog ยืนยันรหัสผ่าน
   Future<bool?> _showPasswordConfirmDialog() async {
     final controller = TextEditingController();
     bool isChecking = false;
@@ -242,7 +226,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'ใส่รหัสผ่านบัญชีหลักเพื่อยืนยันการดำเนินการ', // แก้ข้อความให้เป็นกลาง
+                    'ใส่รหัสผ่านบัญชีหลักเพื่อยืนยันการดำเนินการ',
                     style: TextStyle(fontSize: 14, color: Colors.black),
                   ),
                   const SizedBox(height: 10),
@@ -284,7 +268,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 
-  // ✅ NEW: ฟังก์ชันเลือกเวลา (คัดลอกมาจาก EditAccountPage)
+  // ✅ ฟังก์ชันเลือกเวลา (เหมือน EditAccountPage)
   Future<void> _pickTime({
     required String initialTime,
     required String label,
@@ -430,7 +414,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 
-  // --- ฟังก์ชันสำหรับการบันทึกโปรไฟล์ (อัปเดตเพื่อรองรับเวลาอาหาร Master) ---
+  // --- ฟังก์ชันบันทึกโปรไฟล์ ---
   Future<void> _saveProfile() async {
     if (_isSaving) return;
 
@@ -438,14 +422,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
       return;
     }
 
-    // ✅ เพิ่มการยืนยันว่า Master User ไม่สามารถเปลี่ยนชื่อโปรไฟล์ได้
+    // ป้องกันการเปลี่ยนชื่อบัญชีหลัก
     if (_isMasterProfile &&
         _nameController.text.trim() != _originalProfileName) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('ไม่สามารถเปลี่ยนชื่อบัญชีหลักได้')),
       );
-      _nameController.text = _originalProfileName; // รีเซ็ตชื่อกลับ
+      _nameController.text = _originalProfileName;
       return;
     }
 
@@ -464,22 +448,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final newName = _nameController.text.trim();
       final newInfo = _noteController.text.trim();
 
-      // 1. ข้อมูลที่จะอัปเดตในตาราง users (สำหรับ sub-profile และ master)
+      // ✅ อัปเดตข้อมูลรวมถึงเวลาอาหารของโปรไฟล์นั้นๆ (ไม่ว่าจะ Master หรือ Sub)
       final Map<String, dynamic> updatedValues = {
-        // ใช้ newName เฉพาะในกรณีที่เป็น Sub-profile
         'userid': newName,
         'info': newInfo,
         'image_base64': _customImageBase64 ?? '',
+        'breakfast': _breakfastTime,
+        'lunch': _lunchTime,
+        'dinner': _dinnerTime,
       };
 
-      // 2. ถ้าเป็น Master Profile ต้องอัปเดตเวลาอาหารด้วย
-      if (_isMasterProfile) {
-        updatedValues['breakfast'] = _breakfastTime;
-        updatedValues['lunch'] = _lunchTime;
-        updatedValues['dinner'] = _dinnerTime;
-      }
-
-      // อัปเดตโดยใช้ชื่อโปรไฟล์เดิมเป็นเงื่อนไข
       final count = await db.update(
         'users',
         updatedValues,
@@ -519,11 +497,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  // --- ฟังก์ชันสำหรับลบโปรไฟล์ (ปรับปรุงการแจ้งเตือน) ---
+  // --- ฟังก์ชันลบโปรไฟล์ ---
   Future<void> _deleteProfile() async {
     if (_isSaving) return;
 
-    // ✅ Master Profile ไม่สามารถถูกลบได้
     if (_isMasterProfile) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -533,13 +510,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
       return;
     }
 
-    // ยืนยันรหัสผ่านบัญชีหลักก่อน
     final confirmed = await _showPasswordConfirmDialog();
     if (confirmed != true) {
       return;
     }
 
-    // ยืนยันการลบซ้ำ
     final deleteConfirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -563,20 +538,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (deleteConfirm != true) return;
 
     setState(() {
-      _isSaving = true; // ใช้สถานะเดียวกันเพื่อแสดง Loading
+      _isSaving = true;
     });
 
     try {
       final db = await dbHelper.database;
 
-      // ลบแถวในตาราง users โดยใช้ชื่อโปรไฟล์เดิมเป็นเงื่อนไข
       final count = await db.delete(
         'users',
         where: 'userid = ?',
         whereArgs: [_originalProfileName],
       );
 
-      // ✅ NEW: ลบการแจ้งเตือนและประวัติการกินยาที่ผูกกับโปรไฟล์นี้ด้วย (Cascade Logic)
+      // ลบข้อมูลที่เกี่ยวข้อง (Cascade Logic)
       await db.delete(
         'calendar_alerts',
         where: 'profile_name = ?',
@@ -587,7 +561,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
         where: 'profile_name = ?',
         whereArgs: [_originalProfileName],
       );
-      // หมายเหตุ: Master User ถูกป้องกันการลบไปแล้ว
 
       if (!mounted) return;
 
@@ -599,7 +572,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
             ),
           ),
         );
-        // Pop หน้าจอและส่งค่า true เพื่อบอกว่ามีการเปลี่ยนแปลง
         Navigator.pop(context, true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -672,7 +644,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
 
-                // 4. ส่วนเลือกรูปจาก Assets
                 const SizedBox(height: 16),
                 const Text(
                   'เลือกรูปภาพมาตรฐาน',
@@ -716,7 +687,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
 
-                // ------------------------------------
                 const SizedBox(height: 24),
 
                 Text(
@@ -732,7 +702,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _nameController,
-                  readOnly: _isMasterProfile, // ✅ ห้ามแก้ไขชื่อบัญชีหลัก
+                  readOnly: _isMasterProfile,
                   style: TextStyle(
                     color: _isMasterProfile ? Colors.grey : Colors.black87,
                   ),
@@ -761,138 +731,135 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
                 const SizedBox(height: 16),
 
-                // --- ส่วนแก้ไขเวลาอาหาร (แสดงเฉพาะ Master Profile) ---
-                if (_isMasterProfile) ...[
-                  const Text(
-                    'แก้ไขเวลาอาหาร (สำหรับแจ้งเตือน)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                // --- ✅ ส่วนแก้ไขเวลาอาหาร (เปิดให้แก้ไขได้ทุกโปรไฟล์) ---
+                const Text(
+                  'แก้ไขเวลาอาหาร (สำหรับแจ้งเตือน)',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // อาหารเช้า
+                Row(
+                  children: [
+                    const Icon(Icons.free_breakfast, color: Colors.brown),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'อาหารเช้า',
+                        style: TextStyle(fontSize: 16, color: Colors.black),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () => _pickTime(
+                        initialTime: _breakfastTime,
+                        label: 'อาหารเช้า',
+                        onSelected: (time) =>
+                            setState(() => _breakfastTime = time),
+                      ),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.grey[200],
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        _breakfastTime,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(),
 
-                  // เวลาอาหารเช้า
-                  Row(
-                    children: [
-                      const Icon(Icons.free_breakfast, color: Colors.brown),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'อาหารเช้า',
-                          style: TextStyle(fontSize: 16, color: Colors.black),
+                // อาหารกลางวัน
+                Row(
+                  children: [
+                    const Icon(Icons.fastfood, color: Colors.orange),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'อาหารกลางวัน',
+                        style: TextStyle(fontSize: 16, color: Colors.black),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _pickTime(
+                        initialTime: _lunchTime,
+                        label: 'อาหารกลางวัน',
+                        onSelected: (time) => setState(() => _lunchTime = time),
+                      ),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.grey[200],
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      TextButton(
-                        onPressed: () => _pickTime(
-                          initialTime: _breakfastTime,
-                          label: 'อาหารเช้า',
-                          onSelected: (time) =>
-                              setState(() => _breakfastTime = time),
-                        ),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey[200],
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: Text(
-                          _breakfastTime,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: Colors.black,
-                          ),
+                      child: Text(
+                        _lunchTime,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.black,
                         ),
                       ),
-                    ],
-                  ),
-                  const Divider(),
+                    ),
+                  ],
+                ),
+                const Divider(),
 
-                  // เวลาอาหารกลางวัน
-                  Row(
-                    children: [
-                      const Icon(Icons.fastfood, color: Colors.orange),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'อาหารกลางวัน',
-                          style: TextStyle(fontSize: 16, color: Colors.black),
+                // อาหารเย็น
+                Row(
+                  children: [
+                    const Icon(Icons.dinner_dining, color: Colors.blueGrey),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'อาหารเย็น',
+                        style: TextStyle(fontSize: 16, color: Colors.black),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _pickTime(
+                        initialTime: _dinnerTime,
+                        label: 'อาหารเย็น',
+                        onSelected: (time) =>
+                            setState(() => _dinnerTime = time),
+                      ),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.grey[200],
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      TextButton(
-                        onPressed: () => _pickTime(
-                          initialTime: _lunchTime,
-                          label: 'อาหารกลางวัน',
-                          onSelected: (time) =>
-                              setState(() => _lunchTime = time),
-                        ),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey[200],
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: Text(
-                          _lunchTime,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: Colors.black,
-                          ),
+                      child: Text(
+                        _dinnerTime,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.black,
                         ),
                       ),
-                    ],
-                  ),
-                  const Divider(),
-
-                  // เวลาอาหารเย็น
-                  Row(
-                    children: [
-                      const Icon(Icons.dinner_dining, color: Colors.blueGrey),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'อาหารเย็น',
-                          style: TextStyle(fontSize: 16, color: Colors.black),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => _pickTime(
-                          initialTime: _dinnerTime,
-                          label: 'อาหารเย็น',
-                          onSelected: (time) =>
-                              setState(() => _dinnerTime = time),
-                        ),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey[200],
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: Text(
-                          _dinnerTime,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: Colors.black,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
 
                 // --- END: ส่วนแก้ไขเวลาอาหาร ---
                 const Text(
@@ -925,7 +892,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
                 const SizedBox(height: 24),
 
-                // ปุ่มบันทึกการแก้ไข (เดิม)
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -957,7 +923,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
 
-                // ✅ ปุ่มลบโปรไฟล์ (ใหม่ - ซ่อนเมื่อเป็น Master Profile)
                 if (!_isMasterProfile) ...[
                   const SizedBox(height: 16),
                   SizedBox(
@@ -965,8 +930,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     child: ElevatedButton(
                       onPressed: _isSaving ? null : _deleteProfile,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red, // พื้นแดง
-                        foregroundColor: Colors.white, // ตัวอักษรขาว
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
