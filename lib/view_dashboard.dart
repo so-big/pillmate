@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'nortification_next.dart';
 import 'view_carlendar.dart';
 import 'add_carlendar.dart';
-import 'edit_carlendar.dart'; // ✅ ต้องมั่นใจว่าในไฟล์นี้มี class CarlendarEditSheet
+import 'edit_carlendar.dart';
 import 'create_profile.dart';
 import 'manage_profile.dart';
 import 'view_menu.dart';
@@ -21,6 +21,9 @@ import 'package:ndef/ndef.dart' as ndef;
 
 // ✅ เรียกใช้ DatabaseHelper
 import 'database_helper.dart';
+
+// ✅ Import Notification Service
+import 'nortification_service.dart';
 
 class DashboardPage extends StatefulWidget {
   final String username;
@@ -150,9 +153,15 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _loadInitialData() async {
+    // รอให้โหลดข้อมูลทุกอย่างเสร็จก่อน
     await Future.wait([_loadProfiles(), _loadReminders(), _loadEated()]);
-    // โหลดข้อมูลเสร็จแล้ว -> setup noti ล่วงหน้า
+
+    // Setup Notification (Logics อื่นๆ)
     await NortificationSetup.run(context: context, username: widget.username);
+
+    // ✅ เรียก Service Trigger ตรงนี้ (ท้ายสุด = โหลดเสร็จ 100%)
+    // ไม่ต้องส่ง parameter ใดๆ ตามที่นายท่านสั่ง
+    scheduleNotificationForNewAlert();
   }
 
   // ✅ แก้ไข: โหลด Profiles จาก SQLite
@@ -220,6 +229,9 @@ class _DashboardPageState extends State<DashboardPage> {
         where: 'createby = ?',
         whereArgs: [widget.username],
       );
+
+      // ❌ ลบ Loop ที่เคยเรียก scheduleNotificationForNewAlert(row) ออกแล้ว
+      // เพื่อไปเรียกทีเดียวตอนท้าย _loadInitialData
 
       // แปลง key จาก snake_case (DB) -> camelCase (UI เดิม)
       final List<Map<String, dynamic>> mappedList = results.map((row) {
@@ -352,8 +364,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
     // เมื่อกลับมา ให้โหลดข้อมูลใหม่
     if (result != null) {
-      await _loadReminders();
-      await NortificationSetup.run(context: context, username: widget.username);
+      // เรียก _loadInitialData เลยเพื่อให้ Trigger ทำงานด้วย
+      await _loadInitialData();
     }
   }
 
@@ -387,8 +399,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
     // หากมีการบันทึกและปิดหน้า (result != null) ให้โหลดข้อมูลใหม่
     if (result != null) {
-      await _loadReminders();
-      await NortificationSetup.run(context: context, username: widget.username);
+      // เรียก _loadInitialData เลยเพื่อให้ Trigger ทำงานด้วย
+      await _loadInitialData();
     }
   }
 
