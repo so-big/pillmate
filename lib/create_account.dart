@@ -8,7 +8,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
-import 'database_helper.dart'; // เรียกใช้ไฟล์ Database ที่สร้างใหม่
+import 'database_helper.dart';
 
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({super.key});
@@ -206,11 +206,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
           ),
         ),
         const SizedBox(height: 12),
-
         Center(child: _buildAvatarPreview()),
-
         const SizedBox(height: 16),
-
         SizedBox(
           height: 72,
           child: ListView.builder(
@@ -245,9 +242,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
             },
           ),
         ),
-
-        const SizedBox(height: 10), // ⬇️ ลดระยะห่างตรงนี้
-
+        const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -287,6 +282,14 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         return;
       }
 
+      // ----------------------------------------------------
+      // ✅ NEW: ตั้งค่าเวลาอาหารเริ่มต้น (Default Meal Times)
+      // ----------------------------------------------------
+      // 06:00, 12:00, 18:00 (เก็บเป็น String "HH:mm")
+      const String defaultBreakfast = '06:00';
+      const String defaultLunch = '12:00';
+      const String defaultDinner = '18:00';
+
       // เตรียมข้อมูลลง SQLite (Master User)
       Map<String, dynamic> newUser = {
         'userid': username,
@@ -295,8 +298,11 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         'image_base64': _selectedBase64Image ?? '',
         'sub_profile': '', // Master User ไม่มี Master (ตัวเอง)
         'info': '', // Master User ไม่ต้องมี info ตรงนี้
-        'security_question': _selectedQuestion, // ✅ NEW
-        'security_answer': _answerController.text.trim(), // ✅ NEW
+        'security_question': _selectedQuestion,
+        'security_answer': _answerController.text.trim(),
+        'breakfast': defaultBreakfast, // ✅ NEW: เพิ่มเวลาอาหารเช้า
+        'lunch': defaultLunch, // ✅ NEW: เพิ่มเวลาอาหารกลางวัน
+        'dinner': defaultDinner, // ✅ NEW: เพิ่มเวลาอาหารเย็น
       };
 
       // บันทึกลง SQLite
@@ -382,15 +388,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(height: 16), // ลดจาก 20
+                  const SizedBox(height: 16),
                   // 🔹 ส่วนเลือกรูปโปรไฟล์
                   _buildAvatarSelector(),
-                  const SizedBox(height: 16), // ลดจาก 20
+                  const SizedBox(height: 16),
                   // 1. Username Field
                   TextFormField(
-                    style: const TextStyle(
-                      color: Colors.black,
-                    ), // Style เดิมของคุณ
+                    style: const TextStyle(color: Colors.black),
                     controller: _usernameController,
                     decoration: const InputDecoration(
                       labelText: 'Username (User ID)',
@@ -403,12 +407,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16), // ลดจาก 20
+                  const SizedBox(height: 16),
                   // 2. Password Field
                   TextFormField(
-                    style: const TextStyle(
-                      color: Colors.black,
-                    ), // Style เดิมของคุณ
+                    style: const TextStyle(color: Colors.black),
                     controller: _passwordController,
                     obscureText: true,
                     decoration: const InputDecoration(
@@ -422,12 +424,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16), // ลดจาก 20
+                  const SizedBox(height: 16),
                   // 3. Confirm Password Field
                   TextFormField(
-                    style: const TextStyle(
-                      color: Colors.black,
-                    ), // Style เดิมของคุณ
+                    style: const TextStyle(color: Colors.black),
                     controller: _confirmPasswordController,
                     obscureText: true,
                     decoration: const InputDecoration(
@@ -444,7 +444,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16), // ลดจาก 20
+                  const SizedBox(height: 16),
                   // ✅ NEW: 4. คำถามกันลืม (Dropdown) - ใช้วิธี DropdownButtonFormField
                   DropdownButtonFormField<String>(
                     value: _selectedQuestion,
@@ -471,7 +471,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16), // ลดจาก 20
+                  const SizedBox(height: 16),
                   // ✅ NEW: 5. คำตอบกันลืม (TextField)
                   TextFormField(
                     style: const TextStyle(color: Colors.black),
@@ -488,8 +488,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       return null;
                     },
                   ),
-
-                  const SizedBox(height: 24), // ลดจาก 40
+                  const SizedBox(height: 24),
                   // Create Account Button
                   ElevatedButton(
                     onPressed: _handleCreateAccount,
@@ -509,7 +508,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10), // ลดจาก 20
+                  const SizedBox(height: 10),
                   // Status Message
                   Text(
                     _message,
@@ -521,8 +520,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-
-                  // ✅ ลบ TextButton 'Back to Login' ออก
                 ],
               ),
             ),

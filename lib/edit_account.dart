@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/cupertino.dart'; // เพิ่ม import เพื่อใช้ CupertinoPicker
 
 // 1. นำเข้า DatabaseHelper
 import 'database_helper.dart';
@@ -28,6 +29,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
   // ✅ NEW: Controller สำหรับคำตอบกันลืม
   final TextEditingController _securityAnswerController =
       TextEditingController();
+
+  // ✅ NEW: ตัวแปรเก็บเวลาอาหาร
+  String _breakfastTime = '06:00';
+  String _lunchTime = '12:00';
+  String _dinnerTime = '18:00';
 
   bool _isSaving = false;
   String? _errorMessage;
@@ -66,7 +72,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     _loadAccount();
   }
 
-  // 3. แก้ไขการโหลดข้อมูลจาก SQLite (เพิ่มการโหลด Security info)
+  // 3. แก้ไขการโหลดข้อมูลจาก SQLite (เพิ่มการโหลด Security info และ Meal Times)
   Future<void> _loadAccount() async {
     try {
       final user = await dbHelper.getUser(widget.username);
@@ -79,7 +85,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
           _selectedBase64Image = user['image_base64']?.toString();
           _selectedAvatarIndex = null;
 
-          // ✅ NEW: โหลดคำถามและคำตอบเดิม
+          // โหลดคำถามและคำตอบเดิม
           if (user['security_question'] != null) {
             _selectedSecurityQuestion = user['security_question'].toString();
             // เช็คว่าคำถามเดิมอยู่ในลิสต์ไหม ถ้าไม่อยู่ (เช่น เป็นคำถามเก่า) ให้ reset หรือ handle ตามเหมาะสม
@@ -90,6 +96,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
           if (user['security_answer'] != null) {
             _securityAnswerController.text = user['security_answer'].toString();
           }
+
+          // ✅ NEW: โหลดเวลาอาหาร
+          _breakfastTime = user['breakfast']?.toString() ?? '06:00';
+          _lunchTime = user['lunch']?.toString() ?? '12:00';
+          _dinnerTime = user['dinner']?.toString() ?? '18:00';
         });
       } else {
         debugPrint('User not found in DB');
@@ -250,6 +261,152 @@ class _EditAccountPageState extends State<EditAccountPage> {
     }
   }
 
+  // ✅ NEW: ฟังก์ชันเลือกเวลา (คล้ายกับที่ใช้ใน CalendarEdit)
+  Future<void> _pickTime({
+    required String initialTime,
+    required String label,
+    required void Function(String time) onSelected,
+  }) async {
+    final parts = initialTime.split(':');
+    int initialHour = int.tryParse(parts[0]) ?? 0;
+    int initialMinute = int.tryParse(parts[1]) ?? 0;
+
+    int selectedHour = initialHour;
+    int selectedMinute = initialMinute;
+
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          height: 260,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 6,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(
+                'เลือกเวลาสำหรับ $label (24 ชั่วโมง)',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: CupertinoPicker(
+                        scrollController: FixedExtentScrollController(
+                          initialItem: initialHour.clamp(0, 23),
+                        ),
+                        itemExtent: 32,
+                        magnification: 1.1,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedHour = index;
+                        },
+                        children: List.generate(
+                          24,
+                          (i) => Center(
+                            child: Text(
+                              i.toString().padLeft(2, '0'),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      ':',
+                      style: TextStyle(fontSize: 18, color: Colors.black87),
+                    ),
+                    Expanded(
+                      child: CupertinoPicker(
+                        scrollController: FixedExtentScrollController(
+                          initialItem: initialMinute.clamp(0, 59),
+                        ),
+                        itemExtent: 32,
+                        magnification: 1.1,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedMinute = index;
+                        },
+                        children: List.generate(
+                          60,
+                          (i) => Center(
+                            child: Text(
+                              i.toString().padLeft(2, '0'),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('ยกเลิก'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      final time =
+                          '${selectedHour.toString().padLeft(2, '0')}:${selectedMinute.toString().padLeft(2, '0')}';
+                      onSelected(time);
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('ตกลง'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _saveAccount() async {
     final newPwd = _newPasswordController.text.trim();
     final confirmPwd = _confirmPasswordController.text.trim();
@@ -314,7 +471,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'กรุณากรอกรหัสผ่านเดิมของคุณเพื่อยืนยันการแก้ไข',
+                    'กรุณากรอกรหัสผ่านของคุณเพื่อยืนยันการแก้ไข',
                     style: TextStyle(fontSize: 14, color: Colors.black),
                   ),
                   const SizedBox(height: 12),
@@ -338,7 +495,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                       focusedErrorBorder: const OutlineInputBorder(
                         borderSide: BorderSide(color: Colors.red, width: 2),
                       ),
-                      labelText: 'รหัสผ่านเดิม',
+                      labelText: 'รหัสผ่าน',
                       labelStyle: const TextStyle(color: Colors.black54),
                       errorText: errorText,
                       errorStyle: const TextStyle(color: Colors.redAccent),
@@ -394,7 +551,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     );
   }
 
-  // 5. แก้ไขการบันทึกข้อมูลลง SQLite (เพิ่ม security question/answer)
+  // 5. แก้ไขการบันทึกข้อมูลลง SQLite (เพิ่ม security question/answer + Meal Times)
   Future<void> _applyAccountChanges(String? newPassword) async {
     setState(() {
       _isSaving = true;
@@ -419,9 +576,14 @@ class _EditAccountPageState extends State<EditAccountPage> {
       updatedUser['image_base64'] =
           _selectedBase64Image ?? updatedUser['image_base64'] ?? '';
 
-      // ✅ NEW: อัปเดตคำถามและคำตอบกันลืม
+      // อัปเดตคำถามและคำตอบกันลืม
       updatedUser['security_question'] = _selectedSecurityQuestion;
       updatedUser['security_answer'] = _securityAnswerController.text.trim();
+
+      // ✅ NEW: อัปเดตเวลาอาหาร
+      updatedUser['breakfast'] = _breakfastTime;
+      updatedUser['lunch'] = _lunchTime;
+      updatedUser['dinner'] = _dinnerTime;
 
       // ลบ key 'image' เก่าออกถ้ามี
       updatedUser.remove('image');
@@ -537,6 +699,126 @@ class _EditAccountPageState extends State<EditAccountPage> {
                 ),
               ),
 
+              const SizedBox(height: 24),
+              // --- ✅ NEW: ส่วนแก้ไขเวลาอาหาร ---
+              const Text(
+                'แก้ไขเวลาอาหาร (สำหรับแจ้งเตือน)',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // เวลาอาหารเช้า
+              Row(
+                children: [
+                  const Icon(Icons.free_breakfast, color: Colors.brown),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'อาหารเช้า',
+                      style: TextStyle(fontSize: 16, color: Colors.black),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _pickTime(
+                      initialTime: _breakfastTime,
+                      label: 'อาหารเช้า',
+                      onSelected: (time) =>
+                          setState(() => _breakfastTime = time),
+                    ),
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.grey[200],
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      _breakfastTime,
+                      style: const TextStyle(fontSize: 16, color: Colors.black),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(),
+
+              // เวลาอาหารกลางวัน
+              Row(
+                children: [
+                  const Icon(Icons.fastfood, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'อาหารกลางวัน',
+                      style: TextStyle(fontSize: 16, color: Colors.black),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _pickTime(
+                      initialTime: _lunchTime,
+                      label: 'อาหารกลางวัน',
+                      onSelected: (time) => setState(() => _lunchTime = time),
+                    ),
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.grey[200],
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      _lunchTime,
+                      style: const TextStyle(fontSize: 16, color: Colors.black),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(),
+
+              // เวลาอาหารเย็น
+              Row(
+                children: [
+                  const Icon(Icons.dinner_dining, color: Colors.blueGrey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'อาหารเย็น',
+                      style: TextStyle(fontSize: 16, color: Colors.black),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _pickTime(
+                      initialTime: _dinnerTime,
+                      label: 'อาหารเย็น',
+                      onSelected: (time) => setState(() => _dinnerTime = time),
+                    ),
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.grey[200],
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      _dinnerTime,
+                      style: const TextStyle(fontSize: 16, color: Colors.black),
+                    ),
+                  ),
+                ],
+              ),
+              // --- END: ส่วนแก้ไขเวลาอาหาร ---
               const SizedBox(height: 24),
 
               // ✅ NEW: ส่วนแก้ไขคำถามกันลืม

@@ -2,11 +2,11 @@
 
 import 'dart:convert';
 import 'dart:typed_data';
-
+import 'dart:ui' as ui; // เพิ่ม import เพื่อใช้ ui.instantiateImageCodec
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show rootBundle; // จำเป็นสำหรับการโหลด asset มาแปลง
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/cupertino.dart'; // เพิ่ม import เพื่อใช้ CupertinoPicker
 
 // นำเข้า DatabaseHelper
 import 'database_helper.dart';
@@ -33,10 +33,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   String? _customImageBase64;
 
-  // เก็บชื่อเดิมไว้ เพื่อใช้เป็น WHERE clause เวลาอัปเดต/ลบ
   late String _originalProfileName;
 
   bool _isSaving = false;
+
+  // ✅ NEW: ตัวแปรเก็บเวลาอาหาร (ใช้เมื่อกำลังแก้ Master Profile เท่านั้น)
+  String _breakfastTime = '06:00';
+  String _lunchTime = '12:00';
+  String _dinnerTime = '18:00';
+
+  bool get _isMasterProfile => _originalProfileName == widget.username;
 
   // เรียกใช้ Database Helper
   final dbHelper = DatabaseHelper();
@@ -65,6 +71,29 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final img = p['image_base64'];
     if (img is String && img.isNotEmpty) {
       _customImageBase64 = img;
+    }
+
+    // ✅ NEW: ถ้าเป็น Master Profile ให้โหลดเวลาอาหารล่าสุดมาด้วย
+    if (_isMasterProfile) {
+      _loadMasterMealTimes();
+    }
+  }
+
+  // ✅ NEW: ฟังก์ชันโหลดเวลาอาหารของ Master Account
+  Future<void> _loadMasterMealTimes() async {
+    try {
+      final user = await dbHelper.getUser(widget.username);
+      if (user != null) {
+        if (mounted) {
+          setState(() {
+            _breakfastTime = user['breakfast']?.toString() ?? '06:00';
+            _lunchTime = user['lunch']?.toString() ?? '12:00';
+            _dinnerTime = user['dinner']?.toString() ?? '18:00';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('EditProfile: Error loading master meal times: $e');
     }
   }
 
@@ -216,7 +245,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     'ใส่รหัสผ่านบัญชีหลักเพื่อยืนยันการดำเนินการ', // แก้ข้อความให้เป็นกลาง
                     style: TextStyle(fontSize: 14, color: Colors.black),
                   ),
-
                   const SizedBox(height: 10),
                   TextField(
                     controller: controller,
@@ -256,11 +284,168 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 
-  // --- ฟังก์ชันสำหรับการบันทึกโปรไฟล์ (เดิม) ---
+  // ✅ NEW: ฟังก์ชันเลือกเวลา (คัดลอกมาจาก EditAccountPage)
+  Future<void> _pickTime({
+    required String initialTime,
+    required String label,
+    required void Function(String time) onSelected,
+  }) async {
+    final parts = initialTime.split(':');
+    int initialHour = int.tryParse(parts[0]) ?? 0;
+    int initialMinute = int.tryParse(parts[1]) ?? 0;
+
+    int selectedHour = initialHour;
+    int selectedMinute = initialMinute;
+
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          height: 260,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 6,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(
+                'เลือกเวลาสำหรับ $label (24 ชั่วโมง)',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: CupertinoPicker(
+                        scrollController: FixedExtentScrollController(
+                          initialItem: initialHour.clamp(0, 23),
+                        ),
+                        itemExtent: 32,
+                        magnification: 1.1,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedHour = index;
+                        },
+                        children: List.generate(
+                          24,
+                          (i) => Center(
+                            child: Text(
+                              i.toString().padLeft(2, '0'),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      ':',
+                      style: TextStyle(fontSize: 18, color: Colors.black87),
+                    ),
+                    Expanded(
+                      child: CupertinoPicker(
+                        scrollController: FixedExtentScrollController(
+                          initialItem: initialMinute.clamp(0, 59),
+                        ),
+                        itemExtent: 32,
+                        magnification: 1.1,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedMinute = index;
+                        },
+                        children: List.generate(
+                          60,
+                          (i) => Center(
+                            child: Text(
+                              i.toString().padLeft(2, '0'),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('ยกเลิก'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      final time =
+                          '${selectedHour.toString().padLeft(2, '0')}:${selectedMinute.toString().padLeft(2, '0')}';
+                      onSelected(time);
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('ตกลง'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // --- ฟังก์ชันสำหรับการบันทึกโปรไฟล์ (อัปเดตเพื่อรองรับเวลาอาหาร Master) ---
   Future<void> _saveProfile() async {
     if (_isSaving) return;
 
     if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    // ✅ เพิ่มการยืนยันว่า Master User ไม่สามารถเปลี่ยนชื่อโปรไฟล์ได้
+    if (_isMasterProfile &&
+        _nameController.text.trim() != _originalProfileName) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ไม่สามารถเปลี่ยนชื่อบัญชีหลักได้')),
+      );
+      _nameController.text = _originalProfileName; // รีเซ็ตชื่อกลับ
       return;
     }
 
@@ -279,12 +464,20 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final newName = _nameController.text.trim();
       final newInfo = _noteController.text.trim();
 
-      // ข้อมูลที่จะอัปเดต
+      // 1. ข้อมูลที่จะอัปเดตในตาราง users (สำหรับ sub-profile และ master)
       final Map<String, dynamic> updatedValues = {
+        // ใช้ newName เฉพาะในกรณีที่เป็น Sub-profile
         'userid': newName,
         'info': newInfo,
         'image_base64': _customImageBase64 ?? '',
       };
+
+      // 2. ถ้าเป็น Master Profile ต้องอัปเดตเวลาอาหารด้วย
+      if (_isMasterProfile) {
+        updatedValues['breakfast'] = _breakfastTime;
+        updatedValues['lunch'] = _lunchTime;
+        updatedValues['dinner'] = _dinnerTime;
+      }
 
       // อัปเดตโดยใช้ชื่อโปรไฟล์เดิมเป็นเงื่อนไข
       final count = await db.update(
@@ -326,15 +519,48 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  // --- ฟังก์ชันสำหรับลบโปรไฟล์ (ใหม่) ---
+  // --- ฟังก์ชันสำหรับลบโปรไฟล์ (ปรับปรุงการแจ้งเตือน) ---
   Future<void> _deleteProfile() async {
     if (_isSaving) return;
+
+    // ✅ Master Profile ไม่สามารถถูกลบได้
+    if (_isMasterProfile) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ไม่สามารถลบบัญชีหลักได้ กรุณาใช้เมนูแก้ไขบัญชีหลัก'),
+        ),
+      );
+      return;
+    }
 
     // ยืนยันรหัสผ่านบัญชีหลักก่อน
     final confirmed = await _showPasswordConfirmDialog();
     if (confirmed != true) {
       return;
     }
+
+    // ยืนยันการลบซ้ำ
+    final deleteConfirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ยืนยันการลบโปรไฟล์ย่อย?'),
+        content: Text(
+          'คุณแน่ใจหรือไม่ที่ต้องการลบโปรไฟล์ "${_originalProfileName}"? ข้อมูลนี้จะถูกลบถาวร',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('ยกเลิก'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('ลบ', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (deleteConfirm != true) return;
 
     setState(() {
       _isSaving = true; // ใช้สถานะเดียวกันเพื่อแสดง Loading
@@ -350,12 +576,27 @@ class _EditProfilePageState extends State<EditProfilePage> {
         whereArgs: [_originalProfileName],
       );
 
+      // ✅ NEW: ลบการแจ้งเตือนและประวัติการกินยาที่ผูกกับโปรไฟล์นี้ด้วย (Cascade Logic)
+      await db.delete(
+        'calendar_alerts',
+        where: 'profile_name = ?',
+        whereArgs: [_originalProfileName],
+      );
+      await db.delete(
+        'taken_doses',
+        where: 'profile_name = ?',
+        whereArgs: [_originalProfileName],
+      );
+      // หมายเหตุ: Master User ถูกป้องกันการลบไปแล้ว
+
       if (!mounted) return;
 
       if (count > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('ลบโปรไฟล์ "${_originalProfileName}" เรียบร้อยแล้ว'),
+            content: Text(
+              'ลบโปรไฟล์ "${_originalProfileName}" และข้อมูลที่เกี่ยวข้องเรียบร้อยแล้ว',
+            ),
           ),
         );
         // Pop หน้าจอและส่งค่า true เพื่อบอกว่ามีการเปลี่ยนแปลง
@@ -391,7 +632,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('แก้ไขโปรไฟล์')),
+      appBar: AppBar(
+        title: Text(_isMasterProfile ? 'แก้ไขบัญชีหลัก' : 'แก้ไขโปรไฟล์'),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -476,9 +719,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 // ------------------------------------
                 const SizedBox(height: 24),
 
-                const Text(
-                  'ชื่อโปรไฟล์ *',
-                  style: TextStyle(
+                Text(
+                  _isMasterProfile
+                      ? 'บัญชีหลัก (แก้ไขชื่อไม่ได้)'
+                      : 'ชื่อโปรไฟล์ *',
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.black87,
@@ -487,12 +732,17 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _nameController,
-                  style: const TextStyle(color: Colors.black87),
+                  readOnly: _isMasterProfile, // ✅ ห้ามแก้ไขชื่อบัญชีหลัก
+                  style: TextStyle(
+                    color: _isMasterProfile ? Colors.grey : Colors.black87,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'ระบุชื่อโปรไฟล์',
                     hintStyle: const TextStyle(color: Colors.black45),
                     filled: true,
-                    fillColor: Colors.grey[100],
+                    fillColor: _isMasterProfile
+                        ? Colors.grey[200]
+                        : Colors.grey[100],
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -511,6 +761,140 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
                 const SizedBox(height: 16),
 
+                // --- ส่วนแก้ไขเวลาอาหาร (แสดงเฉพาะ Master Profile) ---
+                if (_isMasterProfile) ...[
+                  const Text(
+                    'แก้ไขเวลาอาหาร (สำหรับแจ้งเตือน)',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // เวลาอาหารเช้า
+                  Row(
+                    children: [
+                      const Icon(Icons.free_breakfast, color: Colors.brown),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'อาหารเช้า',
+                          style: TextStyle(fontSize: 16, color: Colors.black),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => _pickTime(
+                          initialTime: _breakfastTime,
+                          label: 'อาหารเช้า',
+                          onSelected: (time) =>
+                              setState(() => _breakfastTime = time),
+                        ),
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.grey[200],
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          _breakfastTime,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+
+                  // เวลาอาหารกลางวัน
+                  Row(
+                    children: [
+                      const Icon(Icons.fastfood, color: Colors.orange),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'อาหารกลางวัน',
+                          style: TextStyle(fontSize: 16, color: Colors.black),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => _pickTime(
+                          initialTime: _lunchTime,
+                          label: 'อาหารกลางวัน',
+                          onSelected: (time) =>
+                              setState(() => _lunchTime = time),
+                        ),
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.grey[200],
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          _lunchTime,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+
+                  // เวลาอาหารเย็น
+                  Row(
+                    children: [
+                      const Icon(Icons.dinner_dining, color: Colors.blueGrey),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'อาหารเย็น',
+                          style: TextStyle(fontSize: 16, color: Colors.black),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => _pickTime(
+                          initialTime: _dinnerTime,
+                          label: 'อาหารเย็น',
+                          onSelected: (time) =>
+                              setState(() => _dinnerTime = time),
+                        ),
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.grey[200],
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          _dinnerTime,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
+                // --- END: ส่วนแก้ไขเวลาอาหาร ---
                 const Text(
                   'รายละเอียดเพิ่มเติม (ไม่จำเป็นต้องระบุ)',
                   style: TextStyle(
@@ -573,38 +957,40 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
 
-                // ✅ ปุ่มลบโปรไฟล์ (ใหม่)
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _deleteProfile,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red, // พื้นแดง
-                      foregroundColor: Colors.white, // ตัวอักษรขาว
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                // ✅ ปุ่มลบโปรไฟล์ (ใหม่ - ซ่อนเมื่อเป็น Master Profile)
+                if (!_isMasterProfile) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _deleteProfile,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red, // พื้นแดง
+                        foregroundColor: Colors.white, // ตัวอักษรขาว
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
+                      child: _isSaving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'ลบโปรไฟล์',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
-                    child: _isSaving
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text(
-                            'ลบโปรไฟล์',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

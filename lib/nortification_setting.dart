@@ -21,12 +21,12 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   // --- Audio Player ---
   final AudioPlayer _audioPlayer = AudioPlayer();
 
-  // ✅ 1. รายชื่อไฟล์เสียง (Hardcode ตามชื่อไฟล์จริง)
+  // 1. รายชื่อไฟล์เสียง (Hardcode ตามชื่อไฟล์จริง)
   final List<String> _availableSounds = const [
     'assets/sound_norti/01_clock_alarm_normal_30_sec.mp3', // ⬅️ เริ่มที่ 01
     'assets/sound_norti/02_clock_alarm_normal_1_min.mp3',
     'assets/sound_norti/03_clock_alarm_normal_1.30_min.mp3',
-    'assets/sound_norti/04_ clock_alarm_continue_30_sec.mp3', // *ย้ายขึ้นมา*
+    'assets/sound_norti/04_ clock_alarm_continue_30_sec.mp3',
     'assets/sound_norti/05_clock_alarm_continue_1_min.mp3',
     'assets/sound_norti/06_clock_alarm_continue_1.30_min.mp3',
   ];
@@ -36,11 +36,11 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   int _timeModeSnoozeDuration = 5;
   int _timeModeRepeatCount = 3;
 
-  // --- ตัวแปรโหมดมื้ออาหาร ---
-  String? _mealModeSound;
-  TimeOfDay _breakfastTime = const TimeOfDay(hour: 6, minute: 0);
-  TimeOfDay _lunchTime = const TimeOfDay(hour: 12, minute: 0);
-  TimeOfDay _dinnerTime = const TimeOfDay(hour: 18, minute: 0);
+  // --- ตัวแปรโหมดมื้ออาหาร (ถูกลบทิ้งจากหน้านี้) ---
+  // String? _mealModeSound;
+  // TimeOfDay _breakfastTime = const TimeOfDay(hour: 6, minute: 0);
+  // TimeOfDay _lunchTime = const TimeOfDay(hour: 12, minute: 0);
+  // TimeOfDay _dinnerTime = const TimeOfDay(hour: 18, minute: 0);
 
   @override
   void initState() {
@@ -48,7 +48,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     // ตั้งค่าเริ่มต้น
     if (_availableSounds.isNotEmpty) {
       _timeModeSound = _availableSounds.first;
-      _mealModeSound = _availableSounds.first;
+      // _mealModeSound = _availableSounds.first; // ลบส่วนนี้
     }
     _initData();
   }
@@ -60,14 +60,13 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   }
 
   Future<void> _initData() async {
-    // โหลดการตั้งค่าอย่างเดียว ไม่มีการ Test Notification
     await _loadSettingsFromJson();
     setState(() {
       _isLoading = false;
     });
   }
 
-  // ✅ ฟังก์ชันเล่นเสียงตัวอย่าง
+  // ฟังก์ชันเล่นเสียงตัวอย่าง
   Future<void> _playPreview(String? soundPath) async {
     if (soundPath == null) return;
     try {
@@ -118,6 +117,8 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             _timeModeRepeatCount = data['time_mode_repeat_count'];
           }
 
+          // ลบส่วนการโหลด Meal Mode ออก
+          /*
           if (data['meal_mode_sound'] != null &&
               _availableSounds.contains(data['meal_mode_sound'])) {
             _mealModeSound = data['meal_mode_sound'];
@@ -131,6 +132,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           if (data['meal_dinner_time'] != null) {
             _dinnerTime = _parseTime(data['meal_dinner_time']);
           }
+          */
         }
       }
     } catch (e) {
@@ -158,10 +160,11 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       data['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
       data['time_mode_repeat_count'] = _timeModeRepeatCount;
 
-      data['meal_mode_sound'] = _mealModeSound;
-      data['meal_breakfast_time'] = _formatTime(_breakfastTime);
-      data['meal_lunch_time'] = _formatTime(_lunchTime);
-      data['meal_dinner_time'] = _formatTime(_dinnerTime);
+      // ลบส่วนการบันทึก Meal Mode ออก
+      data.remove('meal_mode_sound');
+      data.remove('meal_breakfast_time');
+      data.remove('meal_lunch_time');
+      data.remove('meal_dinner_time');
 
       data['updated_at'] = DateTime.now().toIso8601String();
 
@@ -177,23 +180,14 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     }
   }
 
-  TimeOfDay _parseTime(String timeStr) {
-    final parts = timeStr.split(':');
-    return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
-  }
-
-  String _formatTime(TimeOfDay time) {
-    final h = time.hour.toString().padLeft(2, '0');
-    final m = time.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
+  // ลบฟังก์ชัน _parseTime และ _formatTime ออก เนื่องจากไม่ใช้แล้ว
 
   String _getFileName(String path) {
     // ตัด path ยาวๆ ให้เหลือแค่ชื่อไฟล์
     return path.split('/').last;
   }
 
-  // ✅ NEW: Widget ปุ่มบันทึกขนาดเต็มจอ
+  // Widget ปุ่มบันทึกขนาดเต็มจอ
   Widget _buildSaveButton() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -221,32 +215,20 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('ตั้งค่าการแจ้งเตือน'),
-          backgroundColor: Colors.teal,
-          bottom: const TabBar(
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            indicatorColor: Colors.white,
-            tabs: [
-              Tab(text: 'แจ้งเตือนตามเวลา'),
-              Tab(text: 'แจ้งเตือนตามมื้ออาหาร'),
-            ],
-          ),
-          // ❌ ลบปุ่มบันทึกออกจาก AppBar actions
-          actions: const [],
-        ),
-        body: TabBarView(
-          children: [_buildTimeModeView(), _buildMealModeView()],
-        ),
+    // ลบ DefaultTabController และ TabBarView ออก
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('ตั้งค่าการแจ้งเตือนตามเวลา'), // เปลี่ยน Title
+        backgroundColor: Colors.teal,
+        // ลบ bottom: TabBar ออก
+        actions: const [],
       ),
+      // แสดงเฉพาะ _buildTimeModeView() แทน TabBarView
+      body: _buildTimeModeView(),
     );
   }
 
-  // ---------- UI: โหมดแจ้งเตือนตามเวลา ----------
+  // ---------- UI: โหมดแจ้งเตือนตามเวลา (เหลือแค่ฟังก์ชันนี้) ----------
   Widget _buildTimeModeView() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -355,65 +337,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     );
   }
 
-  // ---------- UI: โหมดแจ้งเตือนตามมื้ออาหาร ----------
-  Widget _buildMealModeView() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'ตั้งค่าเสียงและเวลามื้ออาหาร',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 20),
-
-          // 1. เลือกไฟล์เสียง + ปุ่มเล่น
-          _buildSoundSelector(
-            label: 'เสียงแจ้งเตือนมื้ออาหาร',
-            value: _mealModeSound,
-            onChanged: (val) {
-              setState(() {
-                _mealModeSound = val;
-              });
-              _playPreview(val);
-            },
-          ),
-
-          const SizedBox(height: 24),
-          const Text(
-            'กำหนดเวลามื้ออาหาร (ค่าเริ่มต้น)',
-            style: TextStyle(fontSize: 16),
-          ),
-          const SizedBox(height: 16),
-
-          _buildTimePickerRow(
-            label: 'มื้อเช้า',
-            time: _breakfastTime,
-            onChanged: (newTime) => setState(() => _breakfastTime = newTime),
-          ),
-          const Divider(),
-          _buildTimePickerRow(
-            label: 'มื้อเที่ยง',
-            time: _lunchTime,
-            onChanged: (newTime) => setState(() => _lunchTime = newTime),
-          ),
-          const Divider(),
-          _buildTimePickerRow(
-            label: 'มื้อเย็น',
-            time: _dinnerTime,
-            onChanged: (newTime) => setState(() => _dinnerTime = newTime),
-          ),
-
-          // ✅ เพิ่มช่องว่างก่อนปุ่มบันทึก
-          const SizedBox(height: 32),
-
-          // ✅ NEW: ปุ่มบันทึก
-          _buildSaveButton(),
-        ],
-      ),
-    );
-  }
+  // ลบ Widget _buildMealModeView() ออก
 
   Widget _buildSoundSelector({
     required String label,
@@ -473,47 +397,5 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     );
   }
 
-  Widget _buildTimePickerRow({
-    required String label,
-    required TimeOfDay time,
-    required Function(TimeOfDay) onChanged,
-  }) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.teal.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.teal),
-        ),
-        child: Text(
-          _formatTime(time),
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Colors.teal,
-          ),
-        ),
-      ),
-      onTap: () async {
-        final picked = await showTimePicker(
-          context: context,
-          initialTime: time,
-          builder: (context, child) {
-            return MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(alwaysUse24HourFormat: true),
-              child: child!,
-            );
-          },
-        );
-        if (picked != null) {
-          onChanged(picked);
-        }
-      },
-    );
-  }
+  // ลบ Widget _buildTimePickerRow ออก
 }
