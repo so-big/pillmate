@@ -33,14 +33,10 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
 
   // --- ตัวแปรโหมดเวลา ---
   String? _timeModeSound;
-  int _timeModeSnoozeDuration = 5;
-  int _timeModeRepeatCount = 3;
-
-  // --- ตัวแปรโหมดมื้ออาหาร (ถูกลบทิ้งจากหน้านี้) ---
-  // String? _mealModeSound;
-  // TimeOfDay _breakfastTime = const TimeOfDay(hour: 6, minute: 0);
-  // TimeOfDay _lunchTime = const TimeOfDay(hour: 12, minute: 0);
-  // TimeOfDay _dinnerTime = const TimeOfDay(hour: 18, minute: 0);
+  // ✅ เปลี่ยน Default: 5 -> 2 นาที
+  int _timeModeSnoozeDuration = 2;
+  // ✅ เปลี่ยน Default: 3 -> 1 ครั้ง
+  int _timeModeRepeatCount = 1;
 
   @override
   void initState() {
@@ -48,7 +44,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     // ตั้งค่าเริ่มต้น
     if (_availableSounds.isNotEmpty) {
       _timeModeSound = _availableSounds.first;
-      // _mealModeSound = _availableSounds.first; // ลบส่วนนี้
     }
     _initData();
   }
@@ -110,29 +105,13 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           }
           if (data['time_mode_snooze_duration'] != null) {
             int val = data['time_mode_snooze_duration'];
-            if (val < 3) val = 3;
+            // ✅ เปลี่ยน Min validation: 3 -> 2
+            if (val < 2) val = 2;
             _timeModeSnoozeDuration = val;
           }
           if (data['time_mode_repeat_count'] != null) {
             _timeModeRepeatCount = data['time_mode_repeat_count'];
           }
-
-          // ลบส่วนการโหลด Meal Mode ออก
-          /*
-          if (data['meal_mode_sound'] != null &&
-              _availableSounds.contains(data['meal_mode_sound'])) {
-            _mealModeSound = data['meal_mode_sound'];
-          }
-          if (data['meal_breakfast_time'] != null) {
-            _breakfastTime = _parseTime(data['meal_breakfast_time']);
-          }
-          if (data['meal_lunch_time'] != null) {
-            _lunchTime = _parseTime(data['meal_lunch_time']);
-          }
-          if (data['meal_dinner_time'] != null) {
-            _dinnerTime = _parseTime(data['meal_dinner_time']);
-          }
-          */
         }
       }
     } catch (e) {
@@ -160,7 +139,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       data['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
       data['time_mode_repeat_count'] = _timeModeRepeatCount;
 
-      // ลบส่วนการบันทึก Meal Mode ออก
       data.remove('meal_mode_sound');
       data.remove('meal_breakfast_time');
       data.remove('meal_lunch_time');
@@ -179,8 +157,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       debugPrint('Error saving settings: $e');
     }
   }
-
-  // ลบฟังก์ชัน _parseTime และ _formatTime ออก เนื่องจากไม่ใช้แล้ว
 
   String _getFileName(String path) {
     // ตัด path ยาวๆ ให้เหลือแค่ชื่อไฟล์
@@ -215,15 +191,12 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // ลบ DefaultTabController และ TabBarView ออก
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ตั้งค่าการแจ้งเตือนตามเวลา'), // เปลี่ยน Title
+        title: const Text('ตั้งค่าการแจ้งเตือนตามเวลา'),
         backgroundColor: Colors.teal,
-        // ลบ bottom: TabBar ออก
         actions: const [],
       ),
-      // แสดงเฉพาะ _buildTimeModeView() แทน TabBarView
       body: _buildTimeModeView(),
     );
   }
@@ -271,9 +244,11 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               Expanded(
                 child: Slider(
                   value: _timeModeSnoozeDuration.toDouble(),
-                  min: 3,
+                  // ✅ เปลี่ยน Min value: 3 -> 2
+                  min: 2,
                   max: 60,
-                  divisions: 57,
+                  // ✅ เปลี่ยน Divisions: 57 -> 58
+                  divisions: 58,
                   label: '$_timeModeSnoozeDuration นาที',
                   activeColor: Colors.teal,
                   onChanged: (val) {
@@ -290,7 +265,8 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             ],
           ),
           const Text(
-            '* ต่ำสุด 3 นาที',
+            // ✅ เปลี่ยน Note: 3 -> 2
+            '* ต่ำสุด 2 นาที',
             style: TextStyle(color: Colors.grey, fontSize: 12),
           ),
 
@@ -336,8 +312,6 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       ),
     );
   }
-
-  // ลบ Widget _buildMealModeView() ออก
 
   Widget _buildSoundSelector({
     required String label,
@@ -396,6 +370,4 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       ],
     );
   }
-
-  // ลบ Widget _buildTimePickerRow ออก
 }
