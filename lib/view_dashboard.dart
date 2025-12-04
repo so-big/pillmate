@@ -1,4 +1,3 @@
-// lib/view_dashboard.dart
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
@@ -157,11 +156,12 @@ class _DashboardPageState extends State<DashboardPage> {
     await Future.wait([_loadProfiles(), _loadReminders(), _loadEated()]);
 
     // Setup Notification (Logics อื่นๆ)
+    // NortificationSetup.run() ต้องถูกเรียกก่อนเสมอ
     await NortificationSetup.run(context: context, username: widget.username);
 
     // ✅ เรียก Service Trigger ตรงนี้ (ท้ายสุด = โหลดเสร็จ 100%)
-    // ไม่ต้องส่ง parameter ใดๆ ตามที่นายท่านสั่ง
-    scheduleNotificationForNewAlert();
+    // *** สำคัญ: ต้องส่ง username เข้าไปด้วยตามโค้ดใหม่ของ nortification_service.dart ***
+    scheduleNotificationForNewAlert(widget.username);
   }
 
   // ✅ แก้ไข: โหลด Profiles จาก SQLite
@@ -536,6 +536,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
       await _loadEated();
       await NortificationSetup.run(context: context, username: widget.username);
+      // ✅ เรียก Service Trigger อีกครั้งหลังเคลียร์สถานะ
+      scheduleNotificationForNewAlert(widget.username);
     } catch (e) {
       debugPrint('Dashboard: clearTakenForReminder error: $e');
       if (!mounted) return;
@@ -691,6 +693,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
       // กินยาแล้ว -> อัปเดต noti
       await NortificationSetup.run(context: context, username: widget.username);
+      // ✅ เรียก Service Trigger อีกครั้งหลังบันทึกสถานะ
+      scheduleNotificationForNewAlert(widget.username);
     } catch (e) {
       debugPrint('Dashboard: mark dose taken error: $e');
       if (!mounted) return;
