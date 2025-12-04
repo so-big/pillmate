@@ -1,5 +1,3 @@
-// lib/nortification_service.dart
-
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async'; // เพิ่มสำหรับการใช้ Stream
@@ -29,7 +27,7 @@ Future<void> initializeNotifications() async {
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
 
-  // 2.3 ตั้งค่า iOS/macOS (ตามตัวอย่างแต่ตัดให้สั้นลงเท่าที่จำเป็น)
+  // 2.3 ตั้งค่า iOS/macOS
   final DarwinInitializationSettings initializationSettingsDarwin =
       DarwinInitializationSettings(
         requestAlertPermission: false,
@@ -55,7 +53,7 @@ Future<void> initializeNotifications() async {
   debugPrint('Notification Plugin Initialized & Timezone Configured');
 }
 
-// ✅ ฟังก์ชันตั้งค่า Timezone (คัดลอก Logic มาจากตัวอย่างที่ท่านให้)
+// ✅ ฟังก์ชันตั้งค่า Timezone
 Future<void> _configureLocalTimeZone() async {
   if (kIsWeb || Platform.isLinux) {
     return;
@@ -70,9 +68,10 @@ Future<void> _configureLocalTimeZone() async {
   debugPrint('Local Timezone set to: $timeZoneName');
 }
 
-// Helper อ่านค่า settings (เหมือนเดิม)
+// Helper อ่านค่า settings
 Future<Map<String, dynamic>> _loadNotificationSettings() async {
-  const String defaultRawSoundName = '01_clock_alarm_normal_30_sec';
+  // ✅ แก้ชื่อ default ให้ตรงกับไฟล์เสียงที่ผู้ใช้ระบุ
+  const String defaultRawSoundName = 'a01_clock_alarm_normal_30_sec';
   try {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/pillmate/appstatus.json');
@@ -84,6 +83,7 @@ Future<Map<String, dynamic>> _loadNotificationSettings() async {
           data['time_mode_sound']?.toString().toLowerCase() ??
           defaultRawSoundName;
 
+      // ตรวจสอบความปลอดภัยของชื่อไฟล์
       if (loadedSoundName.contains('.') || loadedSoundName.contains('/')) {
         loadedSoundName = defaultRawSoundName;
       }
@@ -106,16 +106,17 @@ Future<Map<String, dynamic>> _loadNotificationSettings() async {
 // 3. ฟังก์ชันหลักสำหรับตั้งแจ้งเตือน
 void scheduleNotificationForNewAlert() async {
   debugPrint('\n=============================================================');
-  debugPrint('🔔🔔🔔 NOTIFICATION SERVICE TRIGGERED! (FIXED VERSION) 🔔🔔🔔');
+  debugPrint(
+    '🔔🔔🔔 NOTIFICATION SERVICE TRIGGERED! (CUSTOM SOUND ENABLED) 🔔🔔🔔',
+  );
 
   // โหลด Settings
   final settings = await _loadNotificationSettings();
   final int snoozeDuration = settings['snoozeDuration'] as int;
   final int repeatCount = settings['repeatCount'] as int;
-  // ใช้เสียง default ก่อนเพื่อทดสอบความชัวร์ (ถ้าอยากใช้ custom ให้แก้ตรงนี้)
-  // final String rawResourceName = settings['rawResourceName'] as String;
+  // ✅ ดึงชื่อไฟล์เสียงที่ต้องใช้
+  final String rawResourceName = settings['rawResourceName'] as String;
 
-  // ✅ ใช้ tz.TZDateTime.now(tz.local) ตามตัวอย่าง เพื่อให้ได้เวลาปัจจุบันที่ถูกต้องแน่นอน
   final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
 
   // ตั้งเป้าหมาย 11:03 ของวันนี้
@@ -157,25 +158,27 @@ void scheduleNotificationForNewAlert() async {
 
     final NotificationDetails notificationDetails = NotificationDetails(
       android: AndroidNotificationDetails(
-        'pillmate_id',
+        // ⚠️ เปลี่ยน Channel ID ใหม่ เพื่อให้ Android สร้าง Channel ที่มี Custom Sound
+        'pillmate_custom_sound_v2',
         'Pillmate Reminders',
         channelDescription: 'แจ้งเตือนการทานยา',
         importance: Importance.max,
         priority: Priority.high,
         ticker: 'ticker',
-        // sound: RawResourceAndroidNotificationSound(rawResourceName), // เปิดบรรทัดนี้ถ้าจะใช้เสียง Custom
+        // ✅ เปิดใช้ Custom Sound โดยใช้ RawResourceAndroidNotificationSound
+        sound: RawResourceAndroidNotificationSound(rawResourceName),
       ),
     );
 
     try {
-      // ✅ ใช้ zonedSchedule ตามตัวอย่าง
+      // ✅ ใช้ zonedSchedule
       await flutterLocalNotificationsPlugin.zonedSchedule(
         notificationId,
         'ถึงเวลานัดทานยา! (ครั้งที่ ${i + 1})',
         'ทดสอบแจ้งเตือนเวลา ${currentScheduleTime.hour}:${currentScheduleTime.minute.toString().padLeft(2, '0')}:${currentScheduleTime.second}',
         currentScheduleTime,
         notificationDetails,
-        // ✅ ตั้งค่าตามตัวอย่าง: absoluteTime และ exactAllowWhileIdle
+        // ✅ กลับไปใช้ Syntax V18+
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
