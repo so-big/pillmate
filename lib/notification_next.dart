@@ -368,8 +368,19 @@ class NortificationSetup {
           windowEnd = doseTime.add(Duration(minutes: settings.after));
         }
 
-        // เริ่มแจ้งจาก max(now, windowStart)
-        var candidate = windowStart.isAfter(now) ? windowStart : now;
+        // เริ่มแจ้งจากเวลาที่เหมาะสม (ห้าม schedule ตรง "now" เพื่อหลีกเลี่ยงการยิงทันที)
+        var candidate = windowStart;
+        if (!candidate.isAfter(now)) {
+          // เลื่อน candidate ไปยัง step ถัดไปที่มากกว่า now ตามค่า snoozeDuration
+          final int snooze = (snoozeDuration > 0) ? snoozeDuration : 5;
+          final diff = now.difference(windowStart).inMinutes;
+          final steps = (diff <= 0) ? 1 : (diff / snooze).ceil();
+          candidate = windowStart.add(Duration(minutes: steps * snooze));
+          if (!candidate.isAfter(now)) {
+            // fallback เล็กน้อย (กรณี rounding) ให้เป็นนาทีถัดไป
+            candidate = now.add(const Duration(minutes: 1));
+          }
+        }
 
         // ในแต่ละหน้าต่าง จะอนุญาตการแจ้งซ้ำสูงสุด repeatCount ครั้ง (หรือจนกว่า windowEnd จะหมด)
         int perDoseCounter = 0;
