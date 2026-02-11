@@ -1,0 +1,346 @@
+{
+  "strategy": "TYPE_B",
+  "description": "Meal-Based Notification Simulation for user 'Jatsada' over 48 hours",
+  "username": "Jatsada",
+  "meal_times": {
+    "breakfast": "07:00",
+    "lunch": "12:00",
+    "dinner": "18:00",
+    "bedtime": "22:00",
+    "isBedtimeEnabled": true
+  },
+  "constants": {
+    "maxRepeats": 2,
+    "repeatIntervalMin": 3,
+    "beforeMealMinutes": 15,
+    "afterMealMinutes": 15,
+    "forecastHours": 48
+  },
+  "simulation_start": "2026-02-11T10:00:00",
+  "forecast_end": "2026-02-13T10:00:00",
+  "example_medicines": [
+    {
+      "medicine": "Paracetamol 500mg",
+      "meal_timing": "After Meal",
+      "detail": "ลดไข้ แก้ปวด — กินหลังอาหาร ครั้งละ 1-2 เม็ด"
+    },
+    {
+      "medicine": "Omeprazole 20mg",
+      "meal_timing": "Before Meal",
+      "detail": "ลดกรดในกระเพาะ — กินก่อนอาหาร 30 นาที"
+    }
+  ],
+  "total_notifications": 28,
+  "notifications": [
+    {
+      "day": "2026-02-11",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-11T12:15:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 1/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-11T12:18:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 2/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-11T11:45:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 1/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-11T11:48:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 2/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-11T18:15:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 1/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-11T18:18:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 2/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-11T17:45:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 1/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-11T17:48:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 2/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-11T22:00:00",
+      "alert": "1/2",
+      "note": "Bedtime: AT time (never after)",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 1/2 for Bedtime at 22:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-11T22:03:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 2/2 for Bedtime at 22:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-11T21:45:00",
+      "alert": "1/2",
+      "note": "Bedtime + Before Meal: 15min BEFORE bedtime",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 1/2 for Bedtime at 22:00."
+    },
+    {
+      "day": "2026-02-11",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-11T21:48:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 2/2 for Bedtime at 22:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Breakfast",
+      "meal_time": "07:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T07:15:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 1/2 for Breakfast at 07:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Breakfast",
+      "meal_time": "07:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T07:18:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 2/2 for Breakfast at 07:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Breakfast",
+      "meal_time": "07:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T06:45:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 1/2 for Breakfast at 07:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Breakfast",
+      "meal_time": "07:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T06:48:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 2/2 for Breakfast at 07:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T12:15:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 1/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T12:18:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 2/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T11:45:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 1/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Lunch",
+      "meal_time": "12:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T11:48:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 2/2 for Lunch at 12:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T18:15:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 1/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T18:18:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 2/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T17:45:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 1/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Dinner",
+      "meal_time": "18:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T17:48:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 2/2 for Dinner at 18:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T22:00:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 1/2 for Bedtime at 22:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Paracetamol 500mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "After Meal",
+      "notify_at": "2026-02-12T22:03:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Paracetamol 500mg\" (After Meal). Alert 2/2 for Bedtime at 22:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T21:45:00",
+      "alert": "1/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 1/2 for Bedtime at 22:00."
+    },
+    {
+      "day": "2026-02-12",
+      "medicine": "Omeprazole 20mg",
+      "profile": "Jatsada",
+      "meal_slot": "Bedtime",
+      "meal_time": "22:00",
+      "meal_timing": "Before Meal",
+      "notify_at": "2026-02-12T21:48:00",
+      "alert": "2/2",
+      "message": "\"Jatsada\", it is time to take \"Omeprazole 20mg\" (Before Meal). Alert 2/2 for Bedtime at 22:00."
+    }
+  ]
+}

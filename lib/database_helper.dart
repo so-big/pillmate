@@ -119,6 +119,8 @@ class DatabaseHelper {
       'breakfast': 'TEXT DEFAULT "06:00"',
       'lunch': 'TEXT DEFAULT "12:00"',
       'dinner': 'TEXT DEFAULT "18:00"',
+      'bedtime': 'TEXT DEFAULT "22:00"',
+      'is_bedtime_enabled': 'INTEGER DEFAULT 0',
       'info': 'TEXT DEFAULT ""',
       'sub_profile': 'TEXT DEFAULT ""',
       'image_base64': 'TEXT DEFAULT ""',

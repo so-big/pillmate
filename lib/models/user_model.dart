@@ -10,6 +10,8 @@ class UserModel {
   final String breakfast; // "HH:mm"
   final String lunch;
   final String dinner;
+  final String bedtime; // "HH:mm" — ก่อนนอน
+  final bool isBedtimeEnabled;
   final String createdAt;
 
   const UserModel({
@@ -23,6 +25,8 @@ class UserModel {
     this.breakfast = '06:00',
     this.lunch = '12:00',
     this.dinner = '18:00',
+    this.bedtime = '22:00',
+    this.isBedtimeEnabled = false,
     this.createdAt = '',
   });
 
@@ -42,6 +46,8 @@ class UserModel {
       breakfast: (map['breakfast'] ?? '06:00').toString(),
       lunch: (map['lunch'] ?? '12:00').toString(),
       dinner: (map['dinner'] ?? '18:00').toString(),
+      bedtime: (map['bedtime'] ?? '22:00').toString(),
+      isBedtimeEnabled: (map['is_bedtime_enabled'] == 1 || map['is_bedtime_enabled'] == true),
       createdAt: (map['created_at'] ?? '').toString(),
     );
   }
@@ -59,6 +65,8 @@ class UserModel {
       'breakfast': breakfast,
       'lunch': lunch,
       'dinner': dinner,
+      'bedtime': bedtime,
+      'is_bedtime_enabled': isBedtimeEnabled ? 1 : 0,
       'created_at': createdAt,
     };
   }
@@ -75,6 +83,8 @@ class UserModel {
     String? breakfast,
     String? lunch,
     String? dinner,
+    String? bedtime,
+    bool? isBedtimeEnabled,
     String? createdAt,
   }) {
     return UserModel(
@@ -88,6 +98,8 @@ class UserModel {
       breakfast: breakfast ?? this.breakfast,
       lunch: lunch ?? this.lunch,
       dinner: dinner ?? this.dinner,
+      bedtime: bedtime ?? this.bedtime,
+      isBedtimeEnabled: isBedtimeEnabled ?? this.isBedtimeEnabled,
       createdAt: createdAt ?? this.createdAt,
     );
   }

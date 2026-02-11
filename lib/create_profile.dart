@@ -1,17 +1,16 @@
 // lib/create_profile.dart
 
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui; // ใช้สำหรับจัดการรูป / วาดลง canvas
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 
 // Import DatabaseHelper
 import 'database_helper.dart';
+import 'services/auth_service.dart';
 
 class CreateProfilePage extends StatefulWidget {
   const CreateProfilePage({super.key});
@@ -51,33 +50,15 @@ class _CreateProfilePageState extends State<CreateProfilePage> {
     _loadCurrentUser();
   }
 
-  Future<Directory> _appDir() async {
-    return getApplicationDocumentsDirectory();
-  }
-
-  // ยังคงอ่านจาก user-stat.json เพื่อดูว่าใคร Login อยู่ (Master User)
+  // ✅ FIX: ใช้ AuthService.getCurrentUsername() แทนการอ่าน user-stat.json
   Future<void> _loadCurrentUser() async {
     try {
-      final dir = await _appDir();
-      final file = File('${dir.path}/pillmate/user-stat.json');
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          final data = jsonDecode(content);
-          if (data is Map && data['username'] != null) {
-            setState(() {
-              _currentUsername = data['username'].toString();
-            });
-            return;
-          }
-        }
-      }
+      final username = await AuthService.getCurrentUsername();
       setState(() {
-        _currentUsername ??= 'unknown';
+        _currentUsername = (username != null && username.isNotEmpty) ? username : 'unknown';
       });
     } catch (e) {
-      debugPrint('Error reading user-stat.json: $e');
+      debugPrint('Error reading current user from AuthService: $e');
       setState(() {
         _currentUsername ??= 'unknown';
       });

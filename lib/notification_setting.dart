@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 
+import 'database_helper.dart';
+
 class NortificationSettingPage extends StatefulWidget {
   const NortificationSettingPage({super.key});
 
@@ -38,6 +40,10 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   // ✅ เปลี่ยน Default: 3 -> 1 ครั้ง
   int _timeModeRepeatCount = 1;
 
+  // ✅ Notification Strategy: TYPE_A (legacy) or TYPE_B (meal-based, default)
+  String _activeStrategy = 'TYPE_B';
+  final dbHelper = DatabaseHelper();
+
   @override
   void initState() {
     super.initState();
@@ -56,9 +62,31 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
 
   Future<void> _initData() async {
     await _loadSettingsFromJson();
+    await _loadStrategy();
     setState(() {
       _isLoading = false;
     });
+  }
+
+  /// Load notification strategy from DB
+  Future<void> _loadStrategy() async {
+    try {
+      final strategy = await dbHelper.getSetting('notification_strategy');
+      if (strategy == 'TYPE_A' || strategy == 'TYPE_B') {
+        _activeStrategy = strategy!;
+      }
+    } catch (e) {
+      debugPrint('Error loading strategy: $e');
+    }
+  }
+
+  /// Save notification strategy to DB
+  Future<void> _saveStrategy(String strategy) async {
+    try {
+      await dbHelper.setSetting('notification_strategy', strategy);
+    } catch (e) {
+      debugPrint('Error saving strategy: $e');
+    }
   }
 
   // ฟังก์ชันเล่นเสียงตัวอย่าง
@@ -177,10 +205,8 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       data['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
       data['time_mode_repeat_count'] = _timeModeRepeatCount;
 
-      data.remove('meal_mode_sound');
-      data.remove('meal_breakfast_time');
-      data.remove('meal_lunch_time');
-      data.remove('meal_dinner_time');
+      // ✅ บันทึก strategy ลง DB
+      await _saveStrategy(_activeStrategy);
 
       data['updated_at'] = DateTime.now().toIso8601String();
 
@@ -231,124 +257,182 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ตั้งค่าการแจ้งเตือนตามเวลา'),
+        title: const Text('ตั้งค่าการแจ้งเตือน'),
         backgroundColor: Colors.teal,
         actions: const [],
       ),
-      body: _buildTimeModeView(),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ✅ Strategy Selector (TYPE_A vs TYPE_B)
+            _buildStrategySelector(),
+            const SizedBox(height: 24),
+            // Sound + Repeat settings
+            ..._buildTimeModeWidgets(),
+            const SizedBox(height: 32),
+            _buildSaveButton(),
+          ],
+        ),
+      ),
     );
   }
 
-  // ---------- UI: โหมดแจ้งเตือนตามเวลา (เหลือแค่ฟังก์ชันนี้) ----------
-  Widget _buildTimeModeView() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'ตั้งค่าเสียงและการย้ำเตือน',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 20),
-
-          // 1. เลือกไฟล์เสียง + ปุ่มเล่น
-          _buildSoundSelector(
-            label: 'เสียงแจ้งเตือน',
-            value: _timeModeSound,
-            onChanged: (val) {
-              setState(() {
-                _timeModeSound = val;
-              });
-              _playPreview(val);
-            },
-          ),
-
-          const SizedBox(height: 24),
-
-          // 2. ระยะห่างระหว่างการแจ้งเตือน
-          const Text(
-            'ระยะห่างระหว่างการแจ้งเตือน(นาที)',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.teal,
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          Row(
-            children: [
-              Expanded(
-                child: Slider(
-                  value: _timeModeSnoozeDuration.toDouble(),
-                  // ✅ เปลี่ยน Min value: 3 -> 2
-                  min: 2,
-                  max: 60,
-                  // ✅ เปลี่ยน Divisions: 57 -> 58
-                  divisions: 58,
-                  label: '$_timeModeSnoozeDuration นาที',
-                  activeColor: Colors.teal,
-                  onChanged: (val) {
-                    setState(() {
-                      _timeModeSnoozeDuration = val.toInt();
-                    });
-                  },
-                ),
-              ),
-              Text(
-                '$_timeModeSnoozeDuration นาที',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const Text(
-            // ✅ เปลี่ยน Note: 3 -> 2
-            '* ต่ำสุด 2 นาที',
-            style: TextStyle(color: Colors.grey, fontSize: 12),
-          ),
-
-          const SizedBox(height: 24),
-
-          // 3. จำนวนครั้งการย้ำเตือน
-          const Text('จำนวนครั้งการย้ำเตือน', style: TextStyle(fontSize: 16)),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                value: _timeModeRepeatCount,
-                isExpanded: true,
-                items: List.generate(10, (index) {
-                  int count = index + 1;
-                  return DropdownMenuItem(
-                    value: count,
-                    child: Text('$count ครั้ง'),
-                  );
-                }),
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() {
-                      _timeModeRepeatCount = val;
-                    });
-                  }
-                },
+  /// ✅ NEW: Strategy selector — TYPE_A (legacy) or TYPE_B (meal-based)
+  Widget _buildStrategySelector() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'โหมดการแจ้งเตือน',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.teal,
               ),
             ),
-          ),
-
-          // ✅ เพิ่มช่องว่างก่อนปุ่มบันทึก
-          const SizedBox(height: 32),
-
-          // ✅ NEW: ปุ่มบันทึก
-          _buildSaveButton(),
-        ],
+            const SizedBox(height: 12),
+            RadioListTile<String>(
+              title: const Text('📅 Meal-Based (แนะนำ)'),
+              subtitle: const Text(
+                'แจ้งเตือนตามมื้ออาหาร — เช้า/กลางวัน/เย็น/ก่อนนอน, ล่วงหน้า 48 ชม.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: 'TYPE_B',
+              groupValue: _activeStrategy,
+              activeColor: Colors.teal,
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() {
+                    _activeStrategy = val;
+                  });
+                }
+              },
+            ),
+            RadioListTile<String>(
+              title: const Text('⏱ Time-Interval (Legacy)'),
+              subtitle: const Text(
+                'แจ้งเตือนตามช่วงเวลา — ซ้ำ 5× repeat, ขั้นต่ำ 24 ชม.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: 'TYPE_A',
+              groupValue: _activeStrategy,
+              activeColor: Colors.orange,
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() {
+                    _activeStrategy = val;
+                  });
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  // ---------- UI: Sound + repeat settings ----------
+  List<Widget> _buildTimeModeWidgets() {
+    return [
+      const Text(
+        'ตั้งค่าเสียงและการย้ำเตือน',
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      ),
+      const SizedBox(height: 20),
+
+      // 1. เลือกไฟล์เสียง + ปุ่มเล่น
+      _buildSoundSelector(
+        label: 'เสียงแจ้งเตือน',
+        value: _timeModeSound,
+        onChanged: (val) {
+          setState(() {
+            _timeModeSound = val;
+          });
+          _playPreview(val);
+        },
+      ),
+
+      const SizedBox(height: 24),
+
+      // 2. ระยะห่างระหว่างการแจ้งเตือน
+      const Text(
+        'ระยะห่างระหว่างการแจ้งเตือน(นาที)',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Colors.teal,
+        ),
+      ),
+      const SizedBox(height: 8),
+
+      Row(
+        children: [
+          Expanded(
+            child: Slider(
+              value: _timeModeSnoozeDuration.toDouble(),
+              min: 2,
+              max: 60,
+              divisions: 58,
+              label: '$_timeModeSnoozeDuration นาที',
+              activeColor: Colors.teal,
+              onChanged: (val) {
+                setState(() {
+                  _timeModeSnoozeDuration = val.toInt();
+                });
+              },
+            ),
+          ),
+          Text(
+            '$_timeModeSnoozeDuration นาที',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+      const Text(
+        '* ต่ำสุด 2 นาที',
+        style: TextStyle(color: Colors.grey, fontSize: 12),
+      ),
+
+      const SizedBox(height: 24),
+
+      // 3. จำนวนครั้งการย้ำเตือน
+      const Text('จำนวนครั้งการย้ำเตือน', style: TextStyle(fontSize: 16)),
+      const SizedBox(height: 8),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<int>(
+            value: _timeModeRepeatCount,
+            isExpanded: true,
+            items: List.generate(10, (index) {
+              int count = index + 1;
+              return DropdownMenuItem(
+                value: count,
+                child: Text('$count ครั้ง'),
+              );
+            }),
+            onChanged: (val) {
+              if (val != null) {
+                setState(() {
+                  _timeModeRepeatCount = val;
+                });
+              }
+            },
+          ),
+        ),
+      ),
+    ];
   }
 
   Widget _buildSoundSelector({

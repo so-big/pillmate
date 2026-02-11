@@ -1156,13 +1156,45 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                     ),
                     if (medicineDetail.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.info_outline, size: 14, color: Colors.teal),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              medicineDetail,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.teal,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    // ✅ แสดงประเภทมื้อ (ก่อน/หลังอาหาร)
+                    if (r['beforeMeal'] == true || r['afterMeal'] == true) ...[
                       const SizedBox(height: 2),
-                      Text(
-                        medicineDetail,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.black54,
-                        ),
+                      Row(
+                        children: [
+                          Icon(
+                            r['beforeMeal'] == true ? Icons.restaurant : Icons.restaurant_menu,
+                            size: 14,
+                            color: Colors.orange,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            r['beforeMeal'] == true ? 'ก่อนอาหาร' : 'หลังอาหาร',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                     const SizedBox(height: 4),

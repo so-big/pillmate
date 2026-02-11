@@ -41,6 +41,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
   String _breakfastTime = '06:00';
   String _lunchTime = '12:00';
   String _dinnerTime = '18:00';
+  String _bedtimeTime = '22:00';
+  bool _isBedtimeEnabled = false;
 
   // เช็คว่าเป็นบัญชีหลักหรือไม่ (ถ้าชื่อตรงกับ username ที่ login)
   bool get _isMasterProfile => _originalProfileName == widget.username;
@@ -77,6 +79,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _breakfastTime = p['breakfast']?.toString() ?? '06:00';
     _lunchTime = p['lunch']?.toString() ?? '12:00';
     _dinnerTime = p['dinner']?.toString() ?? '18:00';
+    _bedtimeTime = p['bedtime']?.toString() ?? '22:00';
+    _isBedtimeEnabled = (p['is_bedtime_enabled'] == 1 || p['is_bedtime_enabled'] == true);
   }
 
   bool get _usingCustomImage =>
@@ -456,6 +460,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         'breakfast': _breakfastTime,
         'lunch': _lunchTime,
         'dinner': _dinnerTime,
+        'bedtime': _bedtimeTime,
+        'is_bedtime_enabled': _isBedtimeEnabled ? 1 : 0,
       };
 
       final count = await db.update(
@@ -854,6 +860,61 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         style: const TextStyle(
                           fontSize: 16,
                           color: Colors.black,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(),
+
+                // ✅ ก่อนนอน (Bedtime) — toggle + time picker
+                Row(
+                  children: [
+                    const Icon(Icons.bedtime, color: Colors.indigo),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'ก่อนนอน',
+                        style: TextStyle(fontSize: 16, color: Colors.black),
+                      ),
+                    ),
+                    Switch(
+                      value: _isBedtimeEnabled,
+                      activeColor: Colors.teal,
+                      onChanged: (val) {
+                        setState(() {
+                          _isBedtimeEnabled = val;
+                        });
+                      },
+                    ),
+                    TextButton(
+                      onPressed: _isBedtimeEnabled
+                          ? () => _pickTime(
+                              initialTime: _bedtimeTime,
+                              label: 'ก่อนนอน',
+                              onSelected: (time) =>
+                                  setState(() => _bedtimeTime = time),
+                            )
+                          : null,
+                      style: TextButton.styleFrom(
+                        backgroundColor: _isBedtimeEnabled
+                            ? Colors.grey[200]
+                            : Colors.grey[100],
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        _bedtimeTime,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: _isBedtimeEnabled
+                              ? Colors.black
+                              : Colors.grey,
                         ),
                       ),
                     ),
