@@ -494,20 +494,23 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
   }
 
   Widget _buildMealCheckboxes() {
+    final String groupValue = _beforeMeal ? 'before' : (_afterMeal ? 'after' : 'before');
     return Row(
       children: [
         Expanded(
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Checkbox(
-                value: _beforeMeal,
+              Radio<String>(
+                value: 'before',
+                groupValue: groupValue,
                 onChanged: (v) {
                   setState(() {
-                    _beforeMeal = v ?? false;
-                    if (_beforeMeal) _afterMeal = false;
+                    _beforeMeal = true;
+                    _afterMeal = false;
                   });
                 },
+                activeColor: Colors.teal,
               ),
               const Flexible(
                 child: Text(
@@ -523,14 +526,16 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Checkbox(
-                value: _afterMeal,
+              Radio<String>(
+                value: 'after',
+                groupValue: groupValue,
                 onChanged: (v) {
                   setState(() {
-                    _afterMeal = v ?? false;
-                    if (_afterMeal) _beforeMeal = false;
+                    _beforeMeal = false;
+                    _afterMeal = true;
                   });
                 },
+                activeColor: Colors.teal,
               ),
               const Flexible(
                 child: Text(

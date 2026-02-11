@@ -146,6 +146,10 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
         where: 'createby = ?',
         whereArgs: [widget.username],
       );
+      // Debug: แสดงค่า before_meal/after_meal ของแต่ละยา
+      for (final m in result) {
+        debugPrint('💊 _loadMedicines: id=${m['id']}, name=${m['name']}, before_meal=${m['before_meal']}, after_meal=${m['after_meal']}');
+      }
       setState(() {
         _medicines = List<Map<String, dynamic>>.from(result);
         if (_medicines.isNotEmpty && _selectedMedicineId == null) {
@@ -732,12 +736,19 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     bool beforeMeal = (med['before_meal'] == 1);
     bool afterMeal = (med['after_meal'] == 1);
 
+    debugPrint('🔍 _handleSave: medicine before_meal=${med['before_meal']} (${med['before_meal'].runtimeType}), after_meal=${med['after_meal']} (${med['after_meal'].runtimeType})');
+    debugPrint('🔍 _handleSave: parsed beforeMeal=$beforeMeal, afterMeal=$afterMeal');
+
     if (!beforeMeal && !afterMeal) {
       beforeMeal = true;
       afterMeal = false;
+      debugPrint('🔍 _handleSave: FALLBACK -> beforeMeal=true (ทั้งคู่เป็น false)');
     } else if (beforeMeal && afterMeal) {
       afterMeal = false;
+      debugPrint('🔍 _handleSave: OVERRIDE -> afterMeal=false (ทั้งคู่เป็น true)');
     }
+
+    debugPrint('🔍 _handleSave: FINAL beforeMeal=$beforeMeal, afterMeal=$afterMeal');
 
     final flag = beforeMeal ? '1' : '2';
 
@@ -906,6 +917,8 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
         'payload': payloadText,
         'created_at': now.toIso8601String(),
       };
+
+      debugPrint('📝 calendar_alerts INSERT: medicine_before_meal=${row['medicine_before_meal']}, medicine_after_meal=${row['medicine_after_meal']}, notify_mode=${row['notify_mode']}');
 
       await db.insert('calendar_alerts', row);
 

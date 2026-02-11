@@ -261,6 +261,7 @@ class NortificationSetup {
       final until = now.add(const Duration(days: 30));
 
       List<DateTime> allDoseTimes;
+      List<Map<String, dynamic>>? mealDoseInfos; // เก็บข้อมูลมื้ออาหารสำหรับสร้างข้อความ
       if (notifyMode == 'meal') {
         // โหมดมื้ออาหาร: ดึงเวลามื้อจากโปรไฟล์
         final profileName = r['profileName']?.toString() ?? username;
@@ -268,7 +269,8 @@ class NortificationSetup {
           profileMealCache[profileName] = await _readProfileMealTimes(profileName);
         }
         final mealSlots = profileMealCache[profileName] ?? [];
-        allDoseTimes = _generateMealDoseTimes(r, now, until, mealSlots);
+        mealDoseInfos = _generateMealDoseTimesWithInfo(r, now, until, mealSlots);
+        allDoseTimes = mealDoseInfos.map((e) => e['doseTime'] as DateTime).toList();
         debugPrint('NortificationSetup: Reminder $reminderId using MEAL mode with ${mealSlots.length} meal slots, generated ${allDoseTimes.length} doses');
       } else {
         // โหมดช่วงเวลา (interval)
@@ -278,6 +280,54 @@ class NortificationSetup {
 
       // เก็บ notify timestamps ที่ตั้งไว้สำหรับ reminder นี้
       final List<String> timestampsForReminder = [];
+
+      // === สำหรับโหมดมื้ออาหาร: ตั้ง notification เพิ่มเติมตรงเวลามื้ออาหารพอดี ===
+      if (notifyMode == 'meal' && mealDoseInfos != null) {
+        final medName = r['medicineName']?.toString() ?? 'ยา';
+        final rawBeforeVal = r['medicine_before_meal'];
+        final rawAfterVal = r['medicine_after_meal'];
+        final isBeforeMealExtra = (rawBeforeVal == true) || (rawBeforeVal?.toString() == '1') || (rawBeforeVal == 1);
+        final isAfterMealExtra = (rawAfterVal == true) || (rawAfterVal?.toString() == '1') || (rawAfterVal == 1);
+        // ถ้าเป็นยาหลังอาหาร ให้แสดง 'หลัง' ไม่ใช่ 'ก่อน'
+        final mealTimingThExtra = isAfterMealExtra ? 'หลัง' : (isBeforeMealExtra ? 'ก่อน' : 'ก่อน');
+        debugPrint('🍽️ Meal-at notifications: rawBefore=$rawBeforeVal, rawAfter=$rawAfterVal -> isBeforeMeal=$isBeforeMealExtra, isAfterMeal=$isAfterMealExtra, timing=$mealTimingThExtra');
+
+        for (final info in mealDoseInfos) {
+          final mealTime = info['mealTime'] as DateTime;
+          final mealLabel = info['mealLabel'] as String;
+          final doseTime = info['doseTime'] as DateTime;
+          final doseIso = doseTime.toIso8601String();
+          final key = '$reminderId|$doseIso';
+          if (takenKeys.contains(key)) continue;
+
+          // ตั้งแจ้งเตือนตรงเวลามื้ออาหาร (ถ้ายังไม่ผ่าน)
+          if (mealTime.isAfter(now)) {
+            final mealNotifyId = _stableId(username, reminderId, '${doseIso}|meal_at|${mealTime.toIso8601String()}');
+            final mealTitle = 'ได้เวลา$mealLabel';
+            final mealBody = 'ได้เวลาอาหารมื้อ$mealLabel แล้ว อย่าลืมกินยา $medName ${mealTimingThExtra}อาหารนะครับ';
+
+            await _scheduleNotification(
+              id: mealNotifyId,
+              when: mealTime,
+              title: mealTitle,
+              body: mealBody,
+              soundName: soundName,
+            );
+
+            scheduledForUser.add({
+              'notification_id': mealNotifyId,
+              'username': username,
+              'reminder_id': reminderId,
+              'dose_time': doseIso,
+              'notify_at': mealTime.toIso8601String(),
+              'created_at': DateTime.now().toIso8601String(),
+              'canceled': 0,
+            });
+
+            timestampsForReminder.add('(meal_at) ${mealTime.toIso8601String()}');
+          }
+        }
+      }
 
       // เงื่อนไขขั้นต่ำ: ต้องมีจำนวน alerts >= (5 * repeatCount) และช่วงเวลาตั้งแต่แรกถึงล่าสุด >= 24 ชั่วโมง
       final int thresholdCount = 5 * repeatCount;
@@ -293,9 +343,30 @@ class NortificationSetup {
         final key = '$reminderId|$doseIso';
         if (takenKeys.contains(key)) continue; // ข้ามถ้ากินแล้ว
 
-        // หน้าต่างการแจ้งเตือน: [dose - advance, dose + after]
-        final windowStart = doseTime.subtract(Duration(minutes: settings.advance));
-        final windowEnd = doseTime.add(Duration(minutes: settings.after));
+        // หน้าต่างการแจ้งเตือน:
+        // - โหมดมื้ออาหาร: ห้ามแจ้งก่อน doseTime (เริ่มที่ doseTime)
+        // - โหมดเวลา (interval): เหมือนเดิม (dose - advance .. dose + after)
+        DateTime windowStart;
+        final DateTime windowEnd;
+        if (notifyMode == 'meal' && mealDoseInfos != null) {
+          // หาข้อมูลมื้ออาหารที่ตรงกับ doseTime นี้ (ถ้ามี)
+          Map<String, dynamic>? mealInfo;
+          for (final info in mealDoseInfos) {
+            final dt = info['doseTime'] as DateTime;
+            if (dt.isAtSameMomentAs(doseTime)) {
+              mealInfo = info;
+              break;
+            }
+          }
+
+          windowStart = doseTime; // ห้ามเริ่มก่อน doseTime เพื่อไม่ให้แจ้งก่อนมื้อสำหรับยาหลังอาหาร
+          windowEnd = doseTime.add(Duration(minutes: settings.after));
+
+          debugPrint('🍽️ Meal window for reminder $reminderId dose $doseIso: start=$windowStart end=$windowEnd mealInfo=${mealInfo != null ? mealInfo['mealLabel'] : 'unknown'}');
+        } else {
+          windowStart = doseTime.subtract(Duration(minutes: settings.advance));
+          windowEnd = doseTime.add(Duration(minutes: settings.after));
+        }
 
         // เริ่มแจ้งจาก max(now, windowStart)
         var candidate = windowStart.isAfter(now) ? windowStart : now;
@@ -311,15 +382,47 @@ class NortificationSetup {
           // สร้างข้อความตามฟอร์แมตที่กำหนด
           final medName = r['medicineName']?.toString() ?? 'ถึงเวลากินยา';
           final profileName = r['profileName']?.toString() ?? username;
-          final mealTiming = ((r['medicineBeforeMeal'] == true) || (r['medicineBeforeMeal']?.toString() == '1'))
-              ? 'Before Meal'
-              : (((r['medicineAfterMeal'] == true) || (r['medicineAfterMeal']?.toString() == '1')) ? 'After Meal' : '');
+          final isBeforeMeal = ((r['medicine_before_meal'] == true) || (r['medicine_before_meal']?.toString() == '1') || (r['medicine_before_meal'] == 1));
+          final isAfterMealFlag = ((r['medicine_after_meal'] == true) || (r['medicine_after_meal']?.toString() == '1') || (r['medicine_after_meal'] == 1));
+          final mealTimingTh = isBeforeMeal ? 'ก่อน' : (isAfterMealFlag ? 'หลัง' : '');
           final scheduledTimeStr = DateTime.parse(doseIso).toLocal();
           final scheduledTimeFormatted = '${scheduledTimeStr.hour.toString().padLeft(2, '0')}:${scheduledTimeStr.minute.toString().padLeft(2, '0')}';
           final currentCount = perDoseCounter + 1;
 
-          final body = '"$profileName", it is time to take "$medName" (${mealTiming}). Alert $currentCount/$repeatCount for scheduled time $scheduledTimeFormatted.';
-          final title = '$profileName — Reminder';
+          String title;
+          String body;
+
+          // ตรวจสอบว่าเป็นโหมดมื้ออาหาร และสร้างข้อความเฉพาะ
+          if (notifyMode == 'meal' && mealDoseInfos != null) {
+            // หาข้อมูลมื้ออาหารที่ตรงกับ doseTime นี้
+            Map<String, dynamic>? mealInfo;
+            for (final info in mealDoseInfos) {
+              final dt = info['doseTime'] as DateTime;
+              if (dt.isAtSameMomentAs(doseTime)) {
+                mealInfo = info;
+                break;
+              }
+            }
+
+            final mealLabel = mealInfo?['mealLabel']?.toString() ?? 'อาหาร';
+            final mealTime = mealInfo?['mealTime'] as DateTime?;
+
+            // ตรวจสอบว่า notify time ตรงกับเวลามื้ออาหารพอดีหรือไม่ (สำหรับ at-meal-time message)
+            if (mealTime != null && notifyTime.isAtSameMomentAs(mealTime)) {
+              // ข้อความ ณ เวลาอาหาร
+              title = 'ได้เวลา$mealLabel';
+              body = 'ได้เวลาอาหารมื้อ$mealLabel แล้ว อย่าลืมกินยา $medName ${mealTimingTh}อาหารนะครับ';
+            } else {
+              // ข้อความแจ้งเตือนยาตามมื้อ (ก่อน/หลัง 15 นาที)
+              title = 'เตือนกินยา ($profileName)';
+              body = 'ได้เวลากินยา $medName ${mealTimingTh}อาหารมื้อ$mealLabel ของ $profileName (ครั้งที่ $currentCount/$repeatCount เวลา $scheduledTimeFormatted)';
+            }
+          } else {
+            // โหมด interval: ข้อความเดิม
+            final mealTiming = isBeforeMeal ? 'ก่อนอาหาร' : (isAfterMealFlag ? 'หลังอาหาร' : '');
+            title = 'เตือนกินยา ($profileName)';
+            body = 'ได้เวลากินยา $medName ($mealTiming) ของ $profileName ครั้งที่ $currentCount/$repeatCount เวลา $scheduledTimeFormatted';
+          }
 
           await _scheduleNotification(
             id: id,
@@ -409,6 +512,7 @@ class NortificationSetup {
       final rows = await dbHelper.getCalendarAlerts(username);
       // Map snake_case columns to camelCase keys used by _generateDoseTimes
       return rows.map<Map<String, dynamic>>((row) {
+        debugPrint('🔍 _readRemindersFor: id=${row['id']}, medicine_before_meal=${row['medicine_before_meal']} (${row['medicine_before_meal'].runtimeType}), medicine_after_meal=${row['medicine_after_meal']} (${row['medicine_after_meal'].runtimeType}), notify_mode=${row['notify_mode']}');
         return {
           'id': row['id'],
           'medicineName': row['medicine_name'] ?? '',
@@ -420,8 +524,8 @@ class NortificationSetup {
           'notifyMode': row['notify_mode']?.toString() ?? 'interval',
           'intervalMinutes': row['interval_minutes'],
           'intervalHours': row['interval_hours'],
-          'medicineBeforeMeal': row['medicine_before_meal'],
-          'medicineAfterMeal': row['medicine_after_meal'],
+          'medicine_before_meal': row['medicine_before_meal'],
+          'medicine_after_meal': row['medicine_after_meal'],
           'createby': row['createby'],
         };
       }).toList();
@@ -497,14 +601,17 @@ class NortificationSetup {
     }
   }
 
-  /// สร้าง dose times สำหรับโหมดมื้ออาหาร: แจ้งตามเวลามื้อที่เปิดใช้งานทุกวันในช่วง [startFrom, until]
-  static List<DateTime> _generateMealDoseTimes(
+  /// สร้าง dose times สำหรับโหมดมื้ออาหาร:
+  /// - ยาก่อนอาหาร: แจ้งก่อนมื้ออาหาร 15 นาที
+  /// - ยาหลังอาหาร: แจ้งหลังมื้ออาหาร 15 นาที
+  /// คืนค่า List ของ Map ที่มี 'doseTime', 'mealTime', 'mealLabel'
+  static List<Map<String, dynamic>> _generateMealDoseTimesWithInfo(
     Map<String, dynamic> r,
     DateTime startFrom,
     DateTime until,
     List<Map<String, dynamic>> mealSlots,
   ) {
-    final result = <DateTime>[];
+    final result = <Map<String, dynamic>>[];
 
     final startStr = r['startDateTime']?.toString();
     if (startStr == null || startStr.isEmpty) return result;
@@ -519,6 +626,24 @@ class NortificationSetup {
     final rangeStart = startFrom.isAfter(start) ? startFrom : start;
     final rangeEnd = end == null ? until : (until.isBefore(end) ? until : end);
 
+    // ตรวจสอบว่าเป็นยาก่อนอาหารหรือหลังอาหาร
+    final rawBefore = r['medicine_before_meal'];
+    final rawAfter = r['medicine_after_meal'];
+    final isBeforeMeal = (rawBefore == 1) ||
+        (rawBefore == true) ||
+        (rawBefore?.toString() == '1');
+    final isAfterMeal = (rawAfter == 1) ||
+        (rawAfter == true) ||
+        (rawAfter?.toString() == '1');
+
+    // offset: ก่อนอาหาร = -15 นาที, หลังอาหาร = +15 นาที
+    final int offsetMinutes = isBeforeMeal ? -15 : (isAfterMeal ? 15 : 0);
+
+    debugPrint('🍽️ _generateMealDoseTimesWithInfo:');
+    debugPrint('   rawBefore=$rawBefore (type=${rawBefore.runtimeType}), rawAfter=$rawAfter (type=${rawAfter.runtimeType})');
+    debugPrint('   isBeforeMeal=$isBeforeMeal, isAfterMeal=$isAfterMeal');
+    debugPrint('   offsetMinutes=$offsetMinutes (ยาก่อนอาหาร=-15, ยาหลังอาหาร=+15)');
+
     // วนรอบแต่ละวันในช่วง, เพิ่ม dose ตามเวลามื้อที่เปิดใช้งาน
     var currentDay = DateTime(rangeStart.year, rangeStart.month, rangeStart.day);
     final lastDay = DateTime(rangeEnd.year, rangeEnd.month, rangeEnd.day);
@@ -529,14 +654,34 @@ class NortificationSetup {
           currentDay.year, currentDay.month, currentDay.day,
           meal['hour'] as int, meal['minute'] as int,
         );
-        if (!mealTime.isBefore(rangeStart) && !mealTime.isAfter(rangeEnd)) {
-          result.add(mealTime);
+
+        // เวลาแจ้งเตือนยา = เวลามื้ออาหาร ± 15 นาที
+        final doseTime = mealTime.add(Duration(minutes: offsetMinutes));
+
+        if (!doseTime.isBefore(rangeStart) && !doseTime.isAfter(rangeEnd)) {
+          result.add({
+            'doseTime': doseTime,
+            'mealTime': mealTime,
+            'mealLabel': meal['label'] as String,
+            'offsetMinutes': offsetMinutes,
+          });
         }
       }
       currentDay = currentDay.add(const Duration(days: 1));
     }
 
     return result;
+  }
+
+  /// Wrapper เพื่อ compatibility: คืนค่าเฉพาะ List<DateTime> สำหรับ dose times
+  static List<DateTime> _generateMealDoseTimes(
+    Map<String, dynamic> r,
+    DateTime startFrom,
+    DateTime until,
+    List<Map<String, dynamic>> mealSlots,
+  ) {
+    final infos = _generateMealDoseTimesWithInfo(r, startFrom, until, mealSlots);
+    return infos.map((e) => e['doseTime'] as DateTime).toList();
   }
 
   /// สร้างเวลาทั้งหมดในช่วง [startFrom, until] จาก reminder

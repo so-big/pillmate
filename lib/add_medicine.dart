@@ -163,6 +163,9 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
         'created_at': DateTime.now().toIso8601String(),
       };
 
+      debugPrint('💊 _saveMedicine: _beforeMeal=$_beforeMeal, _afterMeal=$_afterMeal');
+      debugPrint('💊 _saveMedicine INSERT: before_meal=${row['before_meal']}, after_meal=${row['after_meal']}, name=${row['name']}');
+
       // บันทึกลงตาราง medicines
       await db.insert('medicines', row);
 
@@ -334,23 +337,27 @@ class _MedicineAddPageState extends State<MedicineAddPage> {
                   'ช่วงเวลาการทานยา',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                CheckboxListTile(
+                RadioListTile<String>(
                   title: const Text('ก่อนอาหาร'),
-                  value: _beforeMeal,
+                  value: 'before',
+                  groupValue: _beforeMeal ? 'before' : (_afterMeal ? 'after' : null),
                   onChanged: (val) {
                     setState(() {
-                      _beforeMeal = val ?? false;
+                      _beforeMeal = true;
+                      _afterMeal = false;
                     });
                   },
                   activeColor: Colors.teal,
                   controlAffinity: ListTileControlAffinity.leading,
                 ),
-                CheckboxListTile(
+                RadioListTile<String>(
                   title: const Text('หลังอาหาร'),
-                  value: _afterMeal,
+                  value: 'after',
+                  groupValue: _beforeMeal ? 'before' : (_afterMeal ? 'after' : null),
                   onChanged: (val) {
                     setState(() {
-                      _afterMeal = val ?? false;
+                      _beforeMeal = false;
+                      _afterMeal = true;
                     });
                   },
                   activeColor: Colors.teal,
