@@ -89,9 +89,14 @@ class NortificationSetup {
           .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin
           >();
-      await androidImpl?.requestNotificationsPermission();
+      final granted = await androidImpl?.requestNotificationsPermission();
+      debugPrint('NortificationSetup: Notification permission granted: $granted');
+      
+      // ขอ permission สำหรับ exact alarm (Android 12+)
+      final exactAlarmPermission = await androidImpl?.requestExactAlarmsPermission();
+      debugPrint('NortificationSetup: Exact alarm permission granted: $exactAlarmPermission');
     } catch (e) {
-      debugPrint('NortificationSetup: requestNotificationsPermission error $e');
+      debugPrint('NortificationSetup: requestPermissions error $e');
     }
 
     // timezone fix เป็น Asia/Bangkok
@@ -165,46 +170,104 @@ class NortificationSetup {
     return (advance: 30, after: 30, playDuration: 1, gap: 5);
   }
 
+  /// อ่านตั้งค่าเสียง + repeat count จาก appstatus.json
+  static Future<Map<String, dynamic>> _readSoundSettings() async {
+    try {
+      final dir = await _appDir();
+      final file = File('${dir.path}/pillmate/appstatus.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          final data = jsonDecode(content);
+          if (data is Map<String, dynamic>) {
+            // ดึงชื่อไฟล์เสียงจาก time_mode_sound (ไม่มี extension)
+            String? soundPath = data['time_mode_sound']?.toString();
+            String soundName = 'alarm'; // default
+            if (soundPath != null && soundPath.isNotEmpty) {
+              // Extract filename without extension
+              // e.g. "assets/sound_norti/a01_clock_alarm_normal_30_sec.mp3" -> "a01_clock_alarm_normal_30_sec"
+              final parts = soundPath.split('/').last.split('.');
+              if (parts.isNotEmpty) {
+                soundName = parts.first.toLowerCase(); // ensure lowercase
+              }
+            }
+
+            final repeatCount = data['time_mode_repeat_count'] as int? ?? 3;
+            final snoozeDuration = data['time_mode_snooze_duration'] as int? ?? 5;
+
+            return {
+              'soundName': soundName,
+              'repeatCount': repeatCount,
+              'snoozeDuration': snoozeDuration,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('NortificationSetup: read sound settings error $e');
+    }
+    return {
+      'soundName': 'alarm',
+      'repeatCount': 3,
+      'snoozeDuration': 5,
+    };
+  }
+
   // ------------ ENTRY POINT (เรียกจาก Dashboard) ------------
 
-  /// core: ล้าง noti เดิมทั้งหมด แล้วตั้ง noti ใหม่ให้ user นี้ล่วงหน้า 2 วัน
+  /// core: ล้าง noti เดิมทั้งหมด แล้วตั้ง noti ใหม่ให้ user นี้ล่วงหน้า (คำนวณ 5 ครั้งถัดไป)
   static Future<void> run({
     required BuildContext context,
     required String username,
   }) async {
     await _initializePluginIfNeeded();
 
-    // 1) ล้าง notification ทั้งหมดของแอป (ทุก user)
+    // 1) ล้าง notification ทั้งหมดของแอป
     try {
       await _flnp.cancelAll();
     } catch (e) {
       debugPrint('NortificationSetup: cancelAll error $e');
     }
 
-    // 2) อ่าน reminders / eated / settings
+    // 2) ล้างข้อมูล scheduled_notifications เดิมใน DB
+    final dbHelper = DatabaseHelper();
+    await dbHelper.clearScheduledNotifications(username);
+
+    // 3) อ่าน reminders / takenDoses / settings
     final reminders = await _readRemindersFor(username);
     final takenKeys = await _readTakenKeysFor(username);
     final settings = await _readSettings();
 
-    final now = DateTime.now();
-    // ลดจาก 7 วันเหลือ 2 วัน ตามที่นายบ่น
-    final until = now.add(const Duration(days: 2));
+    // 4) อ่านเสียง + repeat settings จาก appstatus.json หรือ DB
+    final soundSettings = await _readSoundSettings();
+    final soundName = soundSettings['soundName'] ?? 'alarm';
+    final repeatCount = soundSettings['repeatCount'] ?? 3;
+    final snoozeDuration = soundSettings['snoozeDuration'] ?? 5;
 
-    final scheduledForUser = <ScheduledNotify>[];
+    final now = DateTime.now();
+    final scheduledForUser = <Map<String, dynamic>>[];
 
     for (final r in reminders) {
       final String reminderId = r['id']?.toString() ?? '';
       if (reminderId.isEmpty) continue;
 
-      final times = _generateDoseTimes(r, now, until);
-      for (final doseTime in times) {
-        final doseIso = doseTime.toIso8601String();
-        final key = '$reminderId|$doseIso';
+      // คำนวณเวลากินยาทั้งหมดในช่วง [now, now+7days]
+      final until = now.add(const Duration(days: 7));
+      final allDoseTimes = _generateDoseTimes(r, now, until);
 
-        // ถ้าโดสนี้กินไปแล้วจาก eated.json ก็ไม่ต้องตั้ง noti
-        if (takenKeys.contains(key)) {
-          continue;
+      // เลือกเฉพาะ 5 ครั้งถัดไป (ที่ยังไม่ได้กิน)
+      final nextDoses = <DateTime>[];
+      for (final dt in allDoseTimes) {
+        final doseIso = dt.toIso8601String();
+        final key = '$reminderId|$doseIso';
+        if (!takenKeys.contains(key)) {
+          nextDoses.add(dt);
+          if (nextDoses.length >= 5) break; // จำกัด 5 ครั้ง
         }
+      }
+
+      for (final doseTime in nextDoses) {
+        final doseIso = doseTime.toIso8601String();
 
         // หน้าต่างการแจ้งเตือน: [dose - advance, dose + after]
         final windowStart = doseTime.subtract(
@@ -218,50 +281,47 @@ class NortificationSetup {
         // เริ่มแจ้งจาก max(now, windowStart)
         final firstNotify = windowStart.isAfter(now) ? windowStart : now;
 
-        final gapMinutes = settings.gap <= 0 ? 5 : settings.gap;
+        // สร้าง repeatCount ครั้ง โดยห่างกัน snoozeDuration นาที
+        for (int i = 0; i < repeatCount; i++) {
+          final notifyTime = firstNotify.add(Duration(minutes: (i * snoozeDuration) as int));
 
-        var current = firstNotify;
-        while (!current.isAfter(windowEnd)) {
-          final notifyIso = current.toIso8601String();
+          // ถ้าเกิน windowEnd ก็หยุด
+          if (notifyTime.isAfter(windowEnd)) break;
 
-          // id ไม่ซ้ำต่อ "ครั้งที่ยิง" (dose + เวลา)
-          final id = _stableId(username, reminderId, '$doseIso|$notifyIso');
+          final notifyIso = notifyTime.toIso8601String();
+          final id = _stableId(username, reminderId, '$doseIso|$notifyIso|$i');
 
           final medName = r['medicineName']?.toString() ?? 'ถึงเวลากินยา';
           final profileName = r['profileName']?.toString() ?? username;
 
           await _scheduleNotification(
             id: id,
-            when: current,
+            when: notifyTime,
             title: 'เตือนกินยา ($profileName)',
             body: medName,
+            soundName: soundName,
           );
 
-          scheduledForUser.add(
-            ScheduledNotify(
-              userid: username,
-              reminderId: reminderId,
-              doseDateTime: doseIso,
-              notifyAt: notifyIso,
-              notificationId: id,
-            ),
-          );
-
-          current = current.add(Duration(minutes: gapMinutes));
+          // บันทึกลง DB
+          scheduledForUser.add({
+            'notification_id': id,
+            'username': username,
+            'reminder_id': reminderId,
+            'dose_time': doseIso,
+            'notify_at': notifyIso,
+            'created_at': DateTime.now().toIso8601String(),
+            'canceled': 0,
+          });
         }
       }
     }
 
-    // 3) เขียน pillmate/nortification_setup.json ใหม่ (log เฉพาะของ user ปัจจุบัน)
-    try {
-      final file = await _setupFile();
-      await file.writeAsString(
-        jsonEncode(scheduledForUser.map((e) => e.toJson()).toList()),
-        flush: true,
-      );
-    } catch (e) {
-      debugPrint('NortificationSetup: write setup file error $e');
+    // 5) บันทึก scheduled_notifications ลง DB
+    for (final record in scheduledForUser) {
+      await dbHelper.insertScheduledNotification(record);
     }
+
+    debugPrint('NortificationSetup: Scheduled ${scheduledForUser.length} notifications for $username');
   }
 
   // ------------ READ DATA (from SQLite) ------------
@@ -398,42 +458,51 @@ class NortificationSetup {
     required DateTime when,
     required String title,
     required String body,
+    required String soundName,
   }) async {
-    // ใช้ channel ใหม่สำหรับเสียง alarm.mp3
-    const androidDetails = AndroidNotificationDetails(
+    // ใช้ channel ใหม่สำหรับเสียงที่เลือก
+    final androidDetails = AndroidNotificationDetails(
       'pillmate_alarm_channel',
       'Pillmate Alarm',
       channelDescription: 'แจ้งเตือนเวลากินยาพร้อมเสียงปลุก',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
-      sound: RawResourceAndroidNotificationSound('alarm'),
+      sound: RawResourceAndroidNotificationSound(soundName),
       fullScreenIntent: true,
+      enableVibration: true,
+      enableLights: true,
     );
 
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentSound: true,
       presentBadge: true,
+      sound: 'alarm.mp3', // iOS ใช้ไฟล์เดียว (ถ้าต้องการหลายไฟล์ต้อง copy ไปที่ bundle)
     );
 
-    const details = NotificationDetails(
+    final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
 
     final tzWhen = tz.TZDateTime.from(when, tz.local);
 
-    await _flnp.zonedSchedule(
-      id,
-      title,
-      body,
-      tzWhen,
-      details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      matchDateTimeComponents: null,
-    );
+    try {
+      await _flnp.zonedSchedule(
+        id,
+        title,
+        body,
+        tzWhen,
+        details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: null,
+      );
+      debugPrint('NortificationSetup: Scheduled notification $id at $when with sound $soundName');
+    } catch (e) {
+      debugPrint('NortificationSetup: Failed to schedule notification $id: $e');
+    }
   }
 }

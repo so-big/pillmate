@@ -98,6 +98,19 @@ class DatabaseHelper {
       )
     ''');
 
+    // scheduled_notifications table (track scheduled notifications)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS scheduled_notifications (
+        notification_id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL,
+        reminder_id TEXT NOT NULL,
+        dose_time TEXT NOT NULL,
+        notify_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        canceled INTEGER DEFAULT 0
+      )
+    ''');
+
     // Ensure columns exist on users table (safe ALTER TABLE)
     final userColumns = await _getColumnNames(db, 'users');
     final requiredUserColumns = {
@@ -347,5 +360,38 @@ class DatabaseHelper {
       map[row['key'] as String] = row['value'] as String;
     }
     return map;
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCHEDULED NOTIFICATIONS CRUD
+  // ---------------------------------------------------------------------------
+
+  Future<void> clearScheduledNotifications(String username) async {
+    final db = await database;
+    await db.delete(
+      'scheduled_notifications',
+      where: 'username = ?',
+      whereArgs: [username],
+    );
+  }
+
+  Future<void> insertScheduledNotification(Map<String, dynamic> row) async {
+    final db = await database;
+    await db.insert(
+      'scheduled_notifications',
+      row,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getScheduledNotifications(
+    String username,
+  ) async {
+    final db = await database;
+    return await db.query(
+      'scheduled_notifications',
+      where: 'username = ? AND canceled = 0',
+      whereArgs: [username],
+    );
   }
 }
