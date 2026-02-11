@@ -28,7 +28,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     'assets/sound_norti/a01_clock_alarm_normal_30_sec.mp3', // ⬅️ เริ่มที่ 01
     'assets/sound_norti/a02_clock_alarm_normal_1_min.mp3',
     'assets/sound_norti/a03_clock_alarm_normal_1.30_min.mp3',
-    'assets/sound_norti/a04_ clock_alarm_continue_30_sec.mp3',
+    'assets/sound_norti/A04_clock_alarm_continue_30_sec.mp3',
     'assets/sound_norti/a05_clock_alarm_continue_1_min.mp3',
     'assets/sound_norti/a06_clock_alarm_continue_1.30_min.mp3',
   ];
