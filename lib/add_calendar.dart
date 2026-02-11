@@ -41,8 +41,8 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
   bool _isLoading = true;
   DateTime _startDateTime = DateTime.now();
   DateTime _endDateTime = DateTime.now();
-  bool _notifyByTime = true;
-  bool _notifyByMeal = false;
+  // notify_mode: 'interval' (ตามเวลา) หรือ 'meal' (ตามมื้ออาหาร)
+  String _notifyMode = 'interval';
   int _intervalMinutes = 4 * 60;
   List<Map<String, dynamic>> _medicines = [];
   String? _selectedMedicineId;
@@ -601,6 +601,93 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     return '$hour:$minute';
   }
 
+  // ✅ แสดงสรรพคุณยาของเม็ดยาที่เลือก
+  List<Widget> _buildMedicinePropertiesSection() {
+    Map<String, dynamic>? med;
+    try {
+      med = _medicines.firstWhere(
+        (m) => m['id']?.toString() == _selectedMedicineId,
+      );
+    } catch (_) {
+      med = null;
+    }
+    if (med == null) return [];
+
+    final name = med['name']?.toString() ?? '-';
+    final detail = med['detail']?.toString() ?? '';
+    final beforeMeal = (med['before_meal'] == 1);
+    final afterMeal = (med['after_meal'] == 1);
+
+    String mealLabel = '-';
+    if (beforeMeal && afterMeal) {
+      mealLabel = 'ก่อนอาหาร / หลังอาหาร';
+    } else if (beforeMeal) {
+      mealLabel = 'ก่อนอาหาร';
+    } else if (afterMeal) {
+      mealLabel = 'หลังอาหาร';
+    }
+
+    return [
+      const Text(
+        'สรรพคุณยา',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Colors.black,
+        ),
+      ),
+      const SizedBox(height: 8),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.blue.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.blue.withOpacity(0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.medication, color: Colors.blue, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (detail.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                detail,
+                style: const TextStyle(fontSize: 13, color: Colors.black54),
+              ),
+            ],
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.restaurant_menu, color: Colors.orange, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  'การทานยา: $mealLabel',
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
   // ✅ แก้ไข Logic การบันทึก: ลบ Trigger ออก (เพราะหน้า Dashboard ทำหน้าที่แทนแล้ว)
   Future<void> _handleSave() async {
     if (_isSaving) return;
@@ -809,8 +896,9 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
         'medicine_after_meal': afterMeal ? 1 : 0,
         'start_date_time': _startDateTime.toIso8601String(),
         'end_date_time': _endDateTime.toIso8601String(),
-        'notify_by_time': _notifyByTime ? 1 : 0,
-        'notify_by_meal': _notifyByMeal ? 1 : 0,
+        'notify_by_time': _notifyMode == 'interval' ? 1 : 0,
+        'notify_by_meal': _notifyMode == 'meal' ? 1 : 0,
+        'notify_mode': _notifyMode,
         'interval_minutes': _intervalMinutes,
         'interval_hours': (_intervalMinutes / 60).round(),
         'et': et,
@@ -1131,31 +1219,37 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
               Row(
                 children: [
                   Expanded(
-                    child: CheckboxListTile(
+                    child: RadioListTile<String>(
                       contentPadding: EdgeInsets.zero,
                       title: const Text(
                         'แจ้งเตือนตามเวลา',
                         style: TextStyle(color: Colors.black, fontSize: 14),
                       ),
-                      value: _notifyByTime,
+                      value: 'interval',
+                      groupValue: _notifyMode,
                       onChanged: (v) {
                         setState(() {
-                          _notifyByTime = v ?? false;
+                          _notifyMode = v ?? 'interval';
                         });
                       },
-                      controlAffinity: ListTileControlAffinity.leading,
+                      activeColor: Colors.teal,
                     ),
                   ),
                   Expanded(
-                    child: CheckboxListTile(
+                    child: RadioListTile<String>(
                       contentPadding: EdgeInsets.zero,
                       title: const Text(
                         'แจ้งเตือนตามมื้ออาหาร',
-                        style: TextStyle(color: Colors.grey, fontSize: 14),
+                        style: TextStyle(color: Colors.black, fontSize: 14),
                       ),
-                      value: _notifyByMeal,
-                      onChanged: null,
-                      controlAffinity: ListTileControlAffinity.leading,
+                      value: 'meal',
+                      groupValue: _notifyMode,
+                      onChanged: (v) {
+                        setState(() {
+                          _notifyMode = v ?? 'meal';
+                        });
+                      },
+                      activeColor: Colors.teal,
                     ),
                   ),
                 ],
@@ -1261,37 +1355,68 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
 
               const SizedBox(height: 16),
 
-              // ระยะช่วงเวลาที่จะแจ้งเตือน
-              const Text(
-                'ระยะช่วงเวลาที่จะแจ้งเตือน (ชั่วโมง.นาที)',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: _notifyByTime ? _pickIntervalMinutes : null,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  backgroundColor: Colors.grey[200],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                icon: const Icon(Icons.schedule, color: Colors.black87),
-                label: Text(
-                  'ทุก ${_formatIntervalLabel()} ชั่วโมง',
+              // สรรพคุณยา (Medicine Properties)
+              if (_selectedMedicineId != null) ..._buildMedicinePropertiesSection(),
+
+              const SizedBox(height: 16),
+
+              // ระยะช่วงเวลาที่จะแจ้งเตือน (แสดงเฉพาะโหมด interval)
+              if (_notifyMode == 'interval') ...[
+                const Text(
+                  'ระยะช่วงเวลาที่จะแจ้งเตือน (ชั่วโมง.นาที)',
                   style: TextStyle(
-                    color: _notifyByTime ? Colors.black87 : Colors.black38,
-                    fontSize: 14,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
                   ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _pickIntervalMinutes,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    backgroundColor: Colors.grey[200],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.schedule, color: Colors.black87),
+                  label: Text(
+                    'ทุก ${_formatIntervalLabel()} ชั่วโมง',
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+
+              // ข้อความแนะนำโหมดมื้ออาหาร
+              if (_notifyMode == 'meal') ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.teal.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.restaurant, color: Colors.teal, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'ระบบจะแจ้งเตือนตามเวลามื้ออาหารที่ตั้งไว้ในโปรไฟล์ (เช้า/กลางวัน/เย็น/ก่อนนอน)',
+                          style: TextStyle(color: Colors.teal[800], fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 24),
 

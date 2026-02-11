@@ -49,8 +49,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
   late DateTime _endDateTime;
 
   // รูปแบบแจ้งเตือน
-  bool _notifyByTime = true;
-  bool _notifyByMeal = false;
+  String _notifyMode = 'interval';
 
   int _intervalMinutes = 4 * 60;
 
@@ -82,8 +81,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         ? (DateTime.tryParse(endStr) ?? _startDateTime)
         : _startDateTime;
 
-    _notifyByTime = r['notifyByTime'] == true;
-    _notifyByMeal = r['notifyByMeal'] == true;
+    _notifyMode = r['notifyMode']?.toString() ?? (r['notifyByMeal'] == true ? 'meal' : 'interval');
 
     int intervalMinutes =
         int.tryParse(r['intervalMinutes']?.toString() ?? '') ?? 0;
@@ -1089,8 +1087,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         'medicine_after_meal': afterMeal ? 1 : 0,
         'start_date_time': _startDateTime.toIso8601String(),
         'end_date_time': _endDateTime.toIso8601String(),
-        'notify_by_time': _notifyByTime ? 1 : 0,
-        'notify_by_meal': _notifyByMeal ? 1 : 0,
+        'notify_by_time': _notifyMode == 'interval' ? 1 : 0,
+        'notify_by_meal': _notifyMode == 'meal' ? 1 : 0,
+        'notify_mode': _notifyMode,
         'interval_minutes': _intervalMinutes,
         'interval_hours': (_intervalMinutes / 60).round(),
         'et': et,
@@ -1122,8 +1121,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         'profileName': profileName,
         'startDateTime': _startDateTime.toIso8601String(),
         'endDateTime': _endDateTime.toIso8601String(),
-        'notifyByTime': _notifyByTime,
-        'notifyByMeal': _notifyByMeal,
+        'notifyByTime': _notifyMode == 'interval',
+        'notifyByMeal': _notifyMode == 'meal',
+        'notifyMode': _notifyMode,
         'intervalMinutes': _intervalMinutes,
         'intervalHours': (_intervalMinutes / 60).round(),
         'medicineId': medicineId,
@@ -1431,31 +1431,37 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
               Row(
                 children: [
                   Expanded(
-                    child: CheckboxListTile(
+                    child: RadioListTile<String>(
                       contentPadding: EdgeInsets.zero,
                       title: const Text(
                         'แจ้งเตือนตามเวลา',
                         style: TextStyle(color: Colors.black, fontSize: 14),
                       ),
-                      value: _notifyByTime,
+                      value: 'interval',
+                      groupValue: _notifyMode,
                       onChanged: (v) {
                         setState(() {
-                          _notifyByTime = v ?? false;
+                          _notifyMode = v ?? 'interval';
                         });
                       },
-                      controlAffinity: ListTileControlAffinity.leading,
+                      activeColor: Colors.teal,
                     ),
                   ),
                   Expanded(
-                    child: CheckboxListTile(
+                    child: RadioListTile<String>(
                       contentPadding: EdgeInsets.zero,
                       title: const Text(
                         'แจ้งเตือนตามมื้ออาหาร',
-                        style: TextStyle(color: Colors.grey, fontSize: 14),
+                        style: TextStyle(color: Colors.black, fontSize: 14),
                       ),
-                      value: _notifyByMeal,
-                      onChanged: null,
-                      controlAffinity: ListTileControlAffinity.leading,
+                      value: 'meal',
+                      groupValue: _notifyMode,
+                      onChanged: (v) {
+                        setState(() {
+                          _notifyMode = v ?? 'meal';
+                        });
+                      },
+                      activeColor: Colors.teal,
                     ),
                   ),
                 ],
@@ -1560,36 +1566,61 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
 
               const SizedBox(height: 16),
 
-              const Text(
-                'ระยะช่วงเวลาที่จะแจ้งเตือน (ชั่วโมง.นาที)',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: _notifyByTime ? _pickIntervalMinutes : null,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  backgroundColor: Colors.grey[200],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                icon: const Icon(Icons.schedule, color: Colors.black87),
-                label: Text(
-                  'ทุก ${_formatIntervalLabel()} ชั่วโมง',
+              if (_notifyMode == 'interval') ...[
+                const Text(
+                  'ระยะช่วงเวลาที่จะแจ้งเตือน (ชั่วโมง.นาที)',
                   style: TextStyle(
-                    color: _notifyByTime ? Colors.black87 : Colors.black38,
-                    fontSize: 14,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
                   ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _pickIntervalMinutes,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    backgroundColor: Colors.grey[200],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.schedule, color: Colors.black87),
+                  label: Text(
+                    'ทุก ${_formatIntervalLabel()} ชั่วโมง',
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+
+              if (_notifyMode == 'meal') ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.teal.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.restaurant, color: Colors.teal, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'ระบบจะแจ้งเตือนตามเวลามื้ออาหารที่ตั้งไว้ในโปรไฟล์ (เช้า/กลางวัน/เย็น/ก่อนนอน)',
+                          style: TextStyle(color: Colors.teal[800], fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 24),
 

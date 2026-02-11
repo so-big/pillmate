@@ -35,6 +35,13 @@ class _EditAccountPageState extends State<EditAccountPage> {
   String _breakfastTime = '06:00';
   String _lunchTime = '12:00';
   String _dinnerTime = '18:00';
+  String _bedtimeTime = '21:00';
+
+  // ✅ NEW: เปิด/ปิดการแจ้งเตือนแต่ละมื้อ
+  bool _breakfastNotify = true;
+  bool _lunchNotify = true;
+  bool _dinnerNotify = true;
+  bool _bedtimeNotify = true;
 
   bool _isSaving = false;
   String? _errorMessage;
@@ -98,10 +105,15 @@ class _EditAccountPageState extends State<EditAccountPage> {
             _securityAnswerController.text = user['security_answer'].toString();
           }
 
-          // ✅ NEW: โหลดเวลาอาหาร
+          // ✅ NEW: โหลดเวลาอาหาร + สถานะเปิด/ปิด
           _breakfastTime = user['breakfast']?.toString() ?? '06:00';
           _lunchTime = user['lunch']?.toString() ?? '12:00';
           _dinnerTime = user['dinner']?.toString() ?? '18:00';
+          _bedtimeTime = user['bedtime']?.toString() ?? '21:00';
+          _breakfastNotify = (user['breakfast_notify'] ?? 1) == 1;
+          _lunchNotify = (user['lunch_notify'] ?? 1) == 1;
+          _dinnerNotify = (user['dinner_notify'] ?? 1) == 1;
+          _bedtimeNotify = (user['bedtime_notify'] ?? 1) == 1;
         });
       } else {
         debugPrint('User not found in DB');
@@ -246,6 +258,59 @@ class _EditAccountPageState extends State<EditAccountPage> {
     }
 
     return child;
+  }
+
+  // ✅ Helper: สร้าง Row เวลาอาหาร + สวิตช์เปิด/ปิด
+  Widget _buildMealRow({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String time,
+    required bool enabled,
+    required VoidCallback onTimePick,
+    required ValueChanged<bool> onToggle,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: enabled ? iconColor : Colors.grey[400]),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 16,
+              color: enabled ? Colors.black : Colors.grey,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: enabled ? onTimePick : null,
+          style: TextButton.styleFrom(
+            backgroundColor: enabled ? Colors.grey[200] : Colors.grey[100],
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: Text(
+            time,
+            style: TextStyle(
+              fontSize: 16,
+              color: enabled ? Colors.black : Colors.grey,
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        SizedBox(
+          width: 48,
+          child: Switch(
+            value: enabled,
+            onChanged: onToggle,
+            activeColor: Colors.teal,
+          ),
+        ),
+      ],
+    );
   }
 
   // 4. แก้ไขการตรวจสอบรหัสผ่านเดิมจาก SQLite (with hash support)
@@ -581,10 +646,15 @@ class _EditAccountPageState extends State<EditAccountPage> {
       updatedUser['security_question'] = _selectedSecurityQuestion;
       updatedUser['security_answer'] = _securityAnswerController.text.trim();
 
-      // ✅ NEW: อัปเดตเวลาอาหาร
+      // ✅ NEW: อัปเดตเวลาอาหาร + สถานะเปิด/ปิด
       updatedUser['breakfast'] = _breakfastTime;
       updatedUser['lunch'] = _lunchTime;
       updatedUser['dinner'] = _dinnerTime;
+      updatedUser['bedtime'] = _bedtimeTime;
+      updatedUser['breakfast_notify'] = _breakfastNotify ? 1 : 0;
+      updatedUser['lunch_notify'] = _lunchNotify ? 1 : 0;
+      updatedUser['dinner_notify'] = _dinnerNotify ? 1 : 0;
+      updatedUser['bedtime_notify'] = _bedtimeNotify ? 1 : 0;
 
       // ลบ key 'image' เก่าออกถ้ามี
       updatedUser.remove('image');
@@ -710,114 +780,75 @@ class _EditAccountPageState extends State<EditAccountPage> {
                   color: Colors.black,
                 ),
               ),
+              const SizedBox(height: 4),
+              Text(
+                'เปิด/ปิดสวิตช์เพื่อเลือกมื้อที่ต้องการรับการแจ้งเตือน',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
               const SizedBox(height: 12),
 
               // เวลาอาหารเช้า
-              Row(
-                children: [
-                  const Icon(Icons.free_breakfast, color: Colors.brown),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'อาหารเช้า',
-                      style: TextStyle(fontSize: 16, color: Colors.black),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _pickTime(
-                      initialTime: _breakfastTime,
-                      label: 'อาหารเช้า',
-                      onSelected: (time) =>
-                          setState(() => _breakfastTime = time),
-                    ),
-                    style: TextButton.styleFrom(
-                      backgroundColor: Colors.grey[200],
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: Text(
-                      _breakfastTime,
-                      style: const TextStyle(fontSize: 16, color: Colors.black),
-                    ),
-                  ),
-                ],
+              _buildMealRow(
+                icon: Icons.free_breakfast,
+                iconColor: Colors.brown,
+                label: 'อาหารเช้า',
+                time: _breakfastTime,
+                enabled: _breakfastNotify,
+                onTimePick: () => _pickTime(
+                  initialTime: _breakfastTime,
+                  label: 'อาหารเช้า',
+                  onSelected: (time) =>
+                      setState(() => _breakfastTime = time),
+                ),
+                onToggle: (v) => setState(() => _breakfastNotify = v),
               ),
               const Divider(),
 
               // เวลาอาหารกลางวัน
-              Row(
-                children: [
-                  const Icon(Icons.fastfood, color: Colors.orange),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'อาหารกลางวัน',
-                      style: TextStyle(fontSize: 16, color: Colors.black),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _pickTime(
-                      initialTime: _lunchTime,
-                      label: 'อาหารกลางวัน',
-                      onSelected: (time) => setState(() => _lunchTime = time),
-                    ),
-                    style: TextButton.styleFrom(
-                      backgroundColor: Colors.grey[200],
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: Text(
-                      _lunchTime,
-                      style: const TextStyle(fontSize: 16, color: Colors.black),
-                    ),
-                  ),
-                ],
+              _buildMealRow(
+                icon: Icons.fastfood,
+                iconColor: Colors.orange,
+                label: 'อาหารกลางวัน',
+                time: _lunchTime,
+                enabled: _lunchNotify,
+                onTimePick: () => _pickTime(
+                  initialTime: _lunchTime,
+                  label: 'อาหารกลางวัน',
+                  onSelected: (time) => setState(() => _lunchTime = time),
+                ),
+                onToggle: (v) => setState(() => _lunchNotify = v),
               ),
               const Divider(),
 
               // เวลาอาหารเย็น
-              Row(
-                children: [
-                  const Icon(Icons.dinner_dining, color: Colors.blueGrey),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'อาหารเย็น',
-                      style: TextStyle(fontSize: 16, color: Colors.black),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _pickTime(
-                      initialTime: _dinnerTime,
-                      label: 'อาหารเย็น',
-                      onSelected: (time) => setState(() => _dinnerTime = time),
-                    ),
-                    style: TextButton.styleFrom(
-                      backgroundColor: Colors.grey[200],
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: Text(
-                      _dinnerTime,
-                      style: const TextStyle(fontSize: 16, color: Colors.black),
-                    ),
-                  ),
-                ],
+              _buildMealRow(
+                icon: Icons.dinner_dining,
+                iconColor: Colors.blueGrey,
+                label: 'อาหารเย็น',
+                time: _dinnerTime,
+                enabled: _dinnerNotify,
+                onTimePick: () => _pickTime(
+                  initialTime: _dinnerTime,
+                  label: 'อาหารเย็น',
+                  onSelected: (time) => setState(() => _dinnerTime = time),
+                ),
+                onToggle: (v) => setState(() => _dinnerNotify = v),
+              ),
+              const Divider(),
+
+              // เวลาก่อนนอน
+              _buildMealRow(
+                icon: Icons.bedtime,
+                iconColor: Colors.indigo,
+                label: 'ก่อนนอน',
+                time: _bedtimeTime,
+                enabled: _bedtimeNotify,
+                onTimePick: () => _pickTime(
+                  initialTime: _bedtimeTime,
+                  label: 'ก่อนนอน',
+                  onSelected: (time) => setState(() => _bedtimeTime = time),
+                ),
+                onToggle: (v) => setState(() => _bedtimeNotify = v),
               ),
               // --- END: ส่วนแก้ไขเวลาอาหาร ---
               const SizedBox(height: 24),

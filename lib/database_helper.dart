@@ -119,8 +119,11 @@ class DatabaseHelper {
       'breakfast': 'TEXT DEFAULT "06:00"',
       'lunch': 'TEXT DEFAULT "12:00"',
       'dinner': 'TEXT DEFAULT "18:00"',
-      'bedtime': 'TEXT DEFAULT "22:00"',
-      'is_bedtime_enabled': 'INTEGER DEFAULT 0',
+      'bedtime': 'TEXT DEFAULT "21:00"',
+      'breakfast_notify': 'INTEGER DEFAULT 1',
+      'lunch_notify': 'INTEGER DEFAULT 1',
+      'dinner_notify': 'INTEGER DEFAULT 1',
+      'bedtime_notify': 'INTEGER DEFAULT 1',
       'info': 'TEXT DEFAULT ""',
       'sub_profile': 'TEXT DEFAULT ""',
       'image_base64': 'TEXT DEFAULT ""',
@@ -134,6 +137,24 @@ class DatabaseHelper {
           );
         } catch (_) {
           // Column may already exist from the seed DB
+        }
+      }
+    }
+
+    // Ensure columns exist on calendar_alerts table
+    final calendarColumns = await _getColumnNames(db, 'calendar_alerts');
+    final requiredCalendarColumns = {
+      'notify_mode': 'TEXT DEFAULT "interval"',
+    };
+
+    for (final entry in requiredCalendarColumns.entries) {
+      if (!calendarColumns.contains(entry.key)) {
+        try {
+          await db.execute(
+            'ALTER TABLE calendar_alerts ADD COLUMN ${entry.key} ${entry.value}',
+          );
+        } catch (_) {
+          // Column may already exist
         }
       }
     }
