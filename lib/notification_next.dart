@@ -240,9 +240,9 @@ class NortificationSetup {
 
     // 4) อ่านเสียง + repeat settings จาก appstatus.json หรือ DB
     final soundSettings = await _readSoundSettings();
-    final soundName = soundSettings['soundName'] ?? 'alarm';
-    final repeatCount = soundSettings['repeatCount'] ?? 3;
-    final snoozeDuration = soundSettings['snoozeDuration'] ?? 5;
+    final soundName = (soundSettings['soundName'] as String?) ?? 'alarm';
+    final int repeatCount = (soundSettings['repeatCount'] as int?) ?? 3;
+    final int snoozeDuration = (soundSettings['snoozeDuration'] as int?) ?? 5;
 
     final now = DateTime.now();
     final scheduledForUser = <Map<String, dynamic>>[];
@@ -251,54 +251,60 @@ class NortificationSetup {
       final String reminderId = r['id']?.toString() ?? '';
       if (reminderId.isEmpty) continue;
 
-      // คำนวณเวลากินยาทั้งหมดในช่วง [now, now+7days]
-      final until = now.add(const Duration(days: 7));
+      // คำนวณเวลากินยาทั้งหมด เริ่มจาก now และขยายไปจนกว่าจะครบเงื่อนไขหรือถึง limit (30 วัน)
+      final until = now.add(const Duration(days: 30));
       final allDoseTimes = _generateDoseTimes(r, now, until);
 
-      // เลือกเฉพาะ 5 ครั้งถัดไป (ที่ยังไม่ได้กิน)
-      final nextDoses = <DateTime>[];
-      for (final dt in allDoseTimes) {
-        final doseIso = dt.toIso8601String();
-        final key = '$reminderId|$doseIso';
-        if (!takenKeys.contains(key)) {
-          nextDoses.add(dt);
-          if (nextDoses.length >= 5) break; // จำกัด 5 ครั้ง
-        }
-      }
+      // เก็บ notify timestamps ที่ตั้งไว้สำหรับ reminder นี้
+      final List<String> timestampsForReminder = [];
 
-      for (final doseTime in nextDoses) {
+      // เงื่อนไขขั้นต่ำ: ต้องมีจำนวน alerts >= (5 * repeatCount) และช่วงเวลาตั้งแต่แรกถึงล่าสุด >= 24 ชั่วโมง
+      final int thresholdCount = 5 * repeatCount;
+      final Duration thresholdDuration = const Duration(hours: 24);
+
+      DateTime? firstScheduledForThisReminder;
+      DateTime? lastScheduledForThisReminder;
+      int totalAlertsForThisReminder = 0;
+
+      // สำหรับแต่ละ dose (ตามเวลาที่เกิดขึ้นในอนาคต)
+      for (final doseTime in allDoseTimes) {
         final doseIso = doseTime.toIso8601String();
+        final key = '$reminderId|$doseIso';
+        if (takenKeys.contains(key)) continue; // ข้ามถ้ากินแล้ว
 
         // หน้าต่างการแจ้งเตือน: [dose - advance, dose + after]
-        final windowStart = doseTime.subtract(
-          Duration(minutes: settings.advance),
-        );
+        final windowStart = doseTime.subtract(Duration(minutes: settings.advance));
         final windowEnd = doseTime.add(Duration(minutes: settings.after));
 
-        // ถ้าหน้าต่างหมดอายุไปแล้วทั้งก้อน ก็ข้าม
-        if (windowEnd.isBefore(now)) continue;
-
         // เริ่มแจ้งจาก max(now, windowStart)
-        final firstNotify = windowStart.isAfter(now) ? windowStart : now;
+        var candidate = windowStart.isAfter(now) ? windowStart : now;
 
-        // สร้าง repeatCount ครั้ง โดยห่างกัน snoozeDuration นาที
-        for (int i = 0; i < repeatCount; i++) {
-          final notifyTime = firstNotify.add(Duration(minutes: (i * snoozeDuration) as int));
+        // ในแต่ละหน้าต่าง จะอนุญาตการแจ้งซ้ำสูงสุด repeatCount ครั้ง (หรือจนกว่า windowEnd จะหมด)
+        int perDoseCounter = 0;
+        while (perDoseCounter < repeatCount && !candidate.isAfter(windowEnd)) {
+          final notifyTime = candidate;
 
-          // ถ้าเกิน windowEnd ก็หยุด
-          if (notifyTime.isAfter(windowEnd)) break;
+          // สร้าง id และอย่าให้ซ้ำ
+          final id = _stableId(username, reminderId, '$doseIso|${notifyTime.toIso8601String()}|$perDoseCounter');
 
-          final notifyIso = notifyTime.toIso8601String();
-          final id = _stableId(username, reminderId, '$doseIso|$notifyIso|$i');
-
+          // สร้างข้อความตามฟอร์แมตที่กำหนด
           final medName = r['medicineName']?.toString() ?? 'ถึงเวลากินยา';
           final profileName = r['profileName']?.toString() ?? username;
+          final mealTiming = ((r['medicineBeforeMeal'] == true) || (r['medicineBeforeMeal']?.toString() == '1'))
+              ? 'Before Meal'
+              : (((r['medicineAfterMeal'] == true) || (r['medicineAfterMeal']?.toString() == '1')) ? 'After Meal' : '');
+          final scheduledTimeStr = DateTime.parse(doseIso).toLocal();
+          final scheduledTimeFormatted = '${scheduledTimeStr.hour.toString().padLeft(2, '0')}:${scheduledTimeStr.minute.toString().padLeft(2, '0')}';
+          final currentCount = perDoseCounter + 1;
+
+          final body = '"$profileName", it is time to take "$medName" (${mealTiming}). Alert $currentCount/$repeatCount for scheduled time $scheduledTimeFormatted.';
+          final title = '$profileName — Reminder';
 
           await _scheduleNotification(
             id: id,
             when: notifyTime,
-            title: 'เตือนกินยา ($profileName)',
-            body: medName,
+            title: title,
+            body: body,
             soundName: soundName,
           );
 
@@ -308,10 +314,39 @@ class NortificationSetup {
             'username': username,
             'reminder_id': reminderId,
             'dose_time': doseIso,
-            'notify_at': notifyIso,
+            'notify_at': notifyTime.toIso8601String(),
             'created_at': DateTime.now().toIso8601String(),
             'canceled': 0,
           });
+
+          timestampsForReminder.add(notifyTime.toIso8601String());
+
+          // อัปเดต counters และช่วงเวลา
+          totalAlertsForThisReminder += 1;
+          firstScheduledForThisReminder ??= notifyTime;
+          lastScheduledForThisReminder = notifyTime;
+
+          perDoseCounter += 1;
+          candidate = candidate.add(Duration(minutes: snoozeDuration));
+
+          // เช็คเงื่อนไขทั้งสอง — ถ้าทั้งสองเป็นจริงแล้ว ให้หยุดการสร้าง alert เพิ่มเติมสำหรับ reminder นี้
+          final durationSpan = lastScheduledForThisReminder!.difference(firstScheduledForThisReminder!);
+          if (totalAlertsForThisReminder >= thresholdCount && durationSpan >= thresholdDuration) {
+            break;
+          }
+        }
+
+        // ถ้าบรรลุเงื่อนไขแล้ว ก็หยุดลูป doses ของ reminder นี้
+        if (totalAlertsForThisReminder >= thresholdCount && lastScheduledForThisReminder != null && lastScheduledForThisReminder.difference(firstScheduledForThisReminder ?? lastScheduledForThisReminder) >= thresholdDuration) {
+          break;
+        }
+      }
+
+      // Log รายการ timestamps ที่คำนวณได้สำหรับ reminder นี้
+      if (timestampsForReminder.isNotEmpty) {
+        debugPrint('NortificationSetup: Reminder $reminderId scheduled timestamps:');
+        for (final t in timestampsForReminder) {
+          debugPrint('  - $t');
         }
       }
     }
@@ -321,7 +356,25 @@ class NortificationSetup {
       await dbHelper.insertScheduledNotification(record);
     }
 
-    debugPrint('NortificationSetup: Scheduled ${scheduledForUser.length} notifications for $username');
+    // --- Debug log: รายการ timestamps ทั้งหมด (group by reminder)
+    if (scheduledForUser.isNotEmpty) {
+      final Map<String, List<String>> grouped = {};
+      for (final rec in scheduledForUser) {
+        final rid = rec['reminder_id']?.toString() ?? 'unknown';
+        grouped.putIfAbsent(rid, () => []).add(rec['notify_at']?.toString() ?? '');
+      }
+
+      debugPrint('NortificationSetup: Scheduled ${scheduledForUser.length} notifications for $username');
+      debugPrint('NortificationSetup: Detailed schedule:');
+      for (final entry in grouped.entries) {
+        debugPrint('Reminder ${entry.key}:');
+        for (final ts in entry.value) {
+          debugPrint('  - $ts');
+        }
+      }
+    } else {
+      debugPrint('NortificationSetup: No notifications scheduled for $username');
+    }
   }
 
   // ------------ READ DATA (from SQLite) ------------
@@ -344,6 +397,8 @@ class NortificationSetup {
           'notifyByTime': (row['notify_by_time'] == 1) ? true : false,
           'intervalMinutes': row['interval_minutes'],
           'intervalHours': row['interval_hours'],
+          'medicineBeforeMeal': row['medicine_before_meal'],
+          'medicineAfterMeal': row['medicine_after_meal'],
           'createby': row['createby'],
         };
       }).toList();
