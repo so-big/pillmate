@@ -506,8 +506,6 @@ class NortificationSetup {
   ) {
     final result = <DateTime>[];
 
-    final reminderId = r['id']?.toString() ?? 'unknown';
-
     final startStr = r['startDateTime']?.toString();
     if (startStr == null || startStr.isEmpty) return result;
     final start = DateTime.tryParse(startStr);
@@ -520,8 +518,6 @@ class NortificationSetup {
 
     final rangeStart = startFrom.isAfter(start) ? startFrom : start;
     final rangeEnd = end == null ? until : (until.isBefore(end) ? until : end);
-
-    debugPrint('NortificationSetup: generateMealDoseTimes for $reminderId -> rangeStart=$rangeStart, rangeEnd=$rangeEnd, mealSlots=${mealSlots.length}');
 
     // วนรอบแต่ละวันในช่วง, เพิ่ม dose ตามเวลามื้อที่เปิดใช้งาน
     var currentDay = DateTime(rangeStart.year, rangeStart.month, rangeStart.day);
@@ -539,8 +535,6 @@ class NortificationSetup {
       }
       currentDay = currentDay.add(const Duration(days: 1));
     }
-
-    debugPrint('NortificationSetup: generateMealDoseTimes for $reminderId -> generated ${result.length} meal doses');
 
     return result;
   }

@@ -288,6 +288,91 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     }
   }
 
+  // ✅ แสดงสรรพคุณยาของเม็ดยาที่เลือก (สำหรับหน้าแก้ไข)
+  List<Widget> _buildMedicinePropertiesSection() {
+    Map<String, dynamic>? med;
+    try {
+      med = _medicines.firstWhere((m) => m['id']?.toString() == _selectedMedicineId);
+    } catch (_) {
+      med = null;
+    }
+    if (med == null) return [];
+
+    final name = med['name']?.toString() ?? '-';
+    final detail = med['detail']?.toString() ?? '';
+    final beforeMeal = (med['before_meal'] == 1);
+    final afterMeal = (med['after_meal'] == 1);
+
+    String mealLabel = '-';
+    if (beforeMeal && afterMeal) {
+      mealLabel = 'ก่อนอาหาร / หลังอาหาร';
+    } else if (beforeMeal) {
+      mealLabel = 'ก่อนอาหาร';
+    } else if (afterMeal) {
+      mealLabel = 'หลังอาหาร';
+    }
+
+    return [
+      const Text(
+        'สรรพคุณยา',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Colors.black,
+        ),
+      ),
+      const SizedBox(height: 8),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.blue.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.blue.withOpacity(0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.medication, color: Colors.blue, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (detail.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                detail,
+                style: const TextStyle(fontSize: 13, color: Colors.black54),
+              ),
+            ],
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.restaurant_menu, color: Colors.orange, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  'การทานยา: $mealLabel',
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
   Future<void> _goToCreateProfile() async {
     await Navigator.push(
       context,
@@ -1563,6 +1648,11 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                     ),
                   ),
                 ),
+
+              const SizedBox(height: 16),
+
+              // สรรพคุณยา (Medicine Properties)
+              if (_selectedMedicineId != null) ..._buildMedicinePropertiesSection(),
 
               const SizedBox(height: 16),
 

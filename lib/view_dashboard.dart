@@ -250,6 +250,7 @@ class _DashboardPageState extends State<DashboardPage> {
           'endDateTime': row['end_date_time'],
           'notifyByTime': row['notify_by_time'] == 1,
           'notifyByMeal': row['notify_by_meal'] == 1,
+          'notifyMode': row['notify_mode']?.toString() ?? (row['notify_by_meal'] == 1 ? 'meal' : 'interval'),
           'intervalMinutes': row['interval_minutes'],
           'et': row['et'],
           'payload': row['payload'],
@@ -563,6 +564,48 @@ class _DashboardPageState extends State<DashboardPage> {
 
   DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
+  // Cache profile meal slots to avoid repeated DB queries per reminder
+  final Map<String, List<Map<String, dynamic>>> _profileMealCache = {};
+
+  Future<List<Map<String, dynamic>>> _getProfileMealSlots(String profileName) async {
+    if (_profileMealCache.containsKey(profileName)) return _profileMealCache[profileName]!;
+    try {
+      final db = await dbHelper.database;
+      final rows = await db.query(
+        'users',
+        where: 'userid = ?',
+        whereArgs: [profileName],
+      );
+      if (rows.isEmpty) {
+        _profileMealCache[profileName] = [];
+        return [];
+      }
+      final u = rows.first;
+      final slots = <Map<String, dynamic>>[];
+      final slotDefs = [
+        {'key': 'breakfast', 'notify': 'breakfast_notify'},
+        {'key': 'lunch', 'notify': 'lunch_notify'},
+        {'key': 'dinner', 'notify': 'dinner_notify'},
+        {'key': 'bedtime', 'notify': 'bedtime_notify'},
+      ];
+      for (final s in slotDefs) {
+        final enabled = (u[s['notify']] ?? 1) == 1;
+        if (!enabled) continue;
+        final timeStr = u[s['key']]?.toString() ?? '00:00';
+        final parts = timeStr.split(':');
+        final hour = int.tryParse(parts[0]) ?? 0;
+        final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+        slots.add({'label': s['key'], 'hour': hour, 'minute': minute});
+      }
+      _profileMealCache[profileName] = slots;
+      return slots;
+    } catch (e) {
+      debugPrint('Dashboard: read profile meal slots error $e');
+      _profileMealCache[profileName] = [];
+      return [];
+    }
+  }
+
   List<DateTime> _computeDoseTimesForDay(
     Map<String, dynamic> reminder,
     DateTime viewDate,
@@ -582,7 +625,7 @@ class _DashboardPageState extends State<DashboardPage> {
       end = DateTime.tryParse(endStr);
     }
 
-    final notifyByTime = reminder['notifyByTime'] == true;
+    final notifyMode = reminder['notifyMode']?.toString() ?? (reminder['notifyByMeal'] == true ? 'meal' : 'interval');
 
     final intervalMinutes =
         int.tryParse(reminder['intervalMinutes']?.toString() ?? '') ?? 0;
@@ -598,10 +641,36 @@ class _DashboardPageState extends State<DashboardPage> {
       return [];
     }
 
+    // Meal mode: generate doses at profile meal times for selected day (respect start/end)
+    if (notifyMode == 'meal') {
+      final profileName = reminder['profileName']?.toString() ?? widget.username;
+      // We must run DB read synchronously here; to keep _computeDoseTimesForDay sync, read from cached map if available
+      final cached = _profileMealCache[profileName];
+      List<Map<String, dynamic>> meals = cached ?? [];
+      if (meals.isEmpty) {
+        // Synchronously fetch minimal data by doing a raw query (blocking not ideal, but keeps API sync). We can also return empty and let async caller refresh; here we'll attempt a quick read via db query but using Future.wait earlier may have populated cache.
+        // For reliability, attempt a synchronous read would require refactor — instead, attempt to return empty and rely on NotificationSetup which schedules notifications. To improve UX, we'll try reading asynchronously and then trigger a UI refresh if needed.
+        unawaited(_getProfileMealSlots(profileName).then((slots) {
+          if (slots.isNotEmpty && mounted) setState(() {});
+        }));
+      }
+
+      final result = <DateTime>[];
+      for (final meal in meals) {
+        final hour = meal['hour'] as int;
+        final minute = meal['minute'] as int;
+        final dt = DateTime(selectedDay.year, selectedDay.month, selectedDay.day, hour, minute);
+        if (dt.isBefore(start) || (end != null && dt.isAfter(end))) continue;
+        result.add(dt);
+      }
+      return result;
+    }
+
+    // Interval mode: existing logic
     final dayStart = selectedDay;
     final dayEnd = dayStart.add(const Duration(days: 1));
 
-    if (!notifyByTime || intervalMinutes <= 0) {
+    if (! (reminder['notifyByTime'] == true) || intervalMinutes <= 0) {
       final t = start;
       if (t.isBefore(dayStart) || !t.isBefore(dayEnd)) {
         return [];
@@ -624,15 +693,15 @@ class _DashboardPageState extends State<DashboardPage> {
       first = start.add(Duration(minutes: steps * stepMinutes));
     }
 
-    final result = <DateTime>[];
+    final res = <DateTime>[];
     var t = first;
 
     while (t.isBefore(dayEnd) && (end == null || !t.isAfter(end))) {
-      result.add(t);
+      res.add(t);
       t = t.add(Duration(minutes: stepMinutes));
     }
 
-    return result;
+    return res;
   }
 
   // ---------- CHECK DOSE ----------
