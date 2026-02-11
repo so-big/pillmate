@@ -4,10 +4,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'nortification_next.dart';
-import 'view_carlendar.dart';
-import 'add_carlendar.dart';
-import 'edit_carlendar.dart';
+import 'notification_next.dart';
+import 'view_calendar.dart';
+import 'add_calendar.dart';
+import 'edit_calendar.dart';
 import 'create_profile.dart';
 import 'manage_profile.dart';
 import 'view_menu.dart';
@@ -20,9 +20,10 @@ import 'package:ndef/ndef.dart' as ndef;
 
 // ✅ เรียกใช้ DatabaseHelper
 import 'database_helper.dart';
+import 'services/auth_service.dart';
 
 // ✅ Import Notification Service
-import 'nortification_service.dart';
+import 'notification_service.dart';
 
 class DashboardPage extends StatefulWidget {
   final String username;
@@ -410,9 +411,7 @@ class _DashboardPageState extends State<DashboardPage> {
     try {
       final user = await dbHelper.getUser(widget.username);
       if (user != null) {
-        if (user['password'] == inputPassword) {
-          return true;
-        }
+        return AuthService.verifyPassword(inputPassword, user['password'].toString());
       }
     } catch (e) {
       debugPrint('Dashboard: verifyPassword error: $e');

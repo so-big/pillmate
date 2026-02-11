@@ -1,4 +1,4 @@
-// lib/nortification_next.dart
+// lib/notification_next.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -9,6 +9,8 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+
+import 'database_helper.dart';
 
 /// โครงสร้างบันทึกใน pillmate/nortification_setup.json (log ว่าตั้ง noti อะไรไว้แล้วบ้าง)
 class ScheduledNotify {
@@ -45,12 +47,6 @@ class NortificationSetup {
 
   static Future<Directory> _appDir() async =>
       await getApplicationDocumentsDirectory();
-
-  static Future<File> _remindersFile() async =>
-      File('${(await _appDir()).path}/reminders.json');
-
-  static Future<File> _eatedFile() async =>
-      File('${(await _appDir()).path}/eated.json');
 
   static Future<File> _settingsFile() async =>
       File('${(await _appDir()).path}/nortification_setting.json');
@@ -115,7 +111,7 @@ class NortificationSetup {
     }
   }
 
-  // ------------ READ SETTINGS ------------
+  // ------------ READ SETTINGS (from DB with JSON fallback) ------------
 
   /// อ่านตั้งค่าการแจ้งเตือน
   /// advanceMinutes: แจ้งล่วงหน้านานแค่ไหน
@@ -124,6 +120,23 @@ class NortificationSetup {
   static Future<({int advance, int after, int playDuration, int gap})>
   _readSettings() async {
     try {
+      // Try reading from DB app_settings first
+      final dbHelper = DatabaseHelper();
+      final advanceStr = await dbHelper.getSetting('advanceMinutes');
+      final afterStr = await dbHelper.getSetting('afterMinutes');
+      final playDurStr = await dbHelper.getSetting('playDurationMinutes');
+      final gapStr = await dbHelper.getSetting('repeatGapMinutes');
+
+      if (advanceStr != null || afterStr != null || gapStr != null) {
+        return (
+          advance: int.tryParse(advanceStr ?? '30') ?? 30,
+          after: int.tryParse(afterStr ?? '30') ?? 30,
+          playDuration: int.tryParse(playDurStr ?? '1') ?? 1,
+          gap: int.tryParse(gapStr ?? '5') ?? 5,
+        );
+      }
+
+      // Fallback: try legacy JSON files
       final file = await _settingsFile();
       if (await file.exists()) {
         final content = await file.readAsString();
@@ -251,60 +264,50 @@ class NortificationSetup {
     }
   }
 
-  // ------------ READ DATA (reminders / eated) ------------
+  // ------------ READ DATA (from SQLite) ------------
 
-  /// อ่าน reminders.json (กรองตาม createby = username)
+  /// อ่าน calendar_alerts จาก SQLite (กรองตาม createby = username)
   static Future<List<Map<String, dynamic>>> _readRemindersFor(
     String username,
   ) async {
     try {
-      final f = await _remindersFile();
-      if (!await f.exists()) return [];
-      final content = await f.readAsString();
-      if (content.trim().isEmpty) return [];
-      final raw = jsonDecode(content);
-      if (raw is! List) return [];
-
-      return raw
-          .where((e) {
-            if (e is Map<String, dynamic>) {
-              return e['createby'] == username;
-            }
-            if (e is Map) return e['createby'] == username;
-            return false;
-          })
-          .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
-          .toList();
+      final dbHelper = DatabaseHelper();
+      final rows = await dbHelper.getCalendarAlerts(username);
+      // Map snake_case columns to camelCase keys used by _generateDoseTimes
+      return rows.map<Map<String, dynamic>>((row) {
+        return {
+          'id': row['id'],
+          'medicineName': row['medicine_name'] ?? '',
+          'profileName': row['profile_name'] ?? '',
+          'startDateTime': row['start_date_time'] ?? '',
+          'endDateTime': row['end_date_time'] ?? '',
+          'notifyByTime': (row['notify_by_time'] == 1) ? true : false,
+          'intervalMinutes': row['interval_minutes'],
+          'intervalHours': row['interval_hours'],
+          'createby': row['createby'],
+        };
+      }).toList();
     } catch (e) {
-      debugPrint('NortificationSetup: read reminders error $e');
+      debugPrint('NortificationSetup: read reminders from DB error $e');
       return [];
     }
   }
 
-  /// อ่าน eated.json -> key = '$reminderId|$doseDateTimeIso'
+  /// อ่าน taken_doses จาก SQLite -> key = '$reminderId|$doseDateTimeIso'
   static Future<Set<String>> _readTakenKeysFor(String username) async {
     final keys = <String>{};
     try {
-      final f = await _eatedFile();
-      if (!await f.exists()) return keys;
-      final content = await f.readAsString();
-      if (content.trim().isEmpty) return keys;
-      final raw = jsonDecode(content);
-      if (raw is! List) return keys;
-
-      for (final m in raw) {
-        if (m is Map || m is Map<String, dynamic>) {
-          final map = Map<String, dynamic>.from(m);
-          if (map['userid']?.toString() != username) continue;
-          final rid = map['reminderId']?.toString();
-          final doseStr = map['doseDateTime']?.toString();
-          if (rid != null && doseStr != null && doseStr.isNotEmpty) {
-            keys.add('$rid|$doseStr');
-          }
+      final dbHelper = DatabaseHelper();
+      final rows = await dbHelper.getTakenDoses(username);
+      for (final row in rows) {
+        final rid = row['reminder_id']?.toString();
+        final doseStr = row['dose_date_time']?.toString();
+        if (rid != null && doseStr != null && doseStr.isNotEmpty) {
+          keys.add('$rid|$doseStr');
         }
       }
     } catch (e) {
-      debugPrint('NortificationSetup: read eated error $e');
+      debugPrint('NortificationSetup: read taken doses from DB error $e');
     }
     return keys;
   }

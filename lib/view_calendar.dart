@@ -1,4 +1,4 @@
-// lib/view_carlendar.dart
+// lib/view_calendar.dart
 
 import 'dart:io';
 import 'dart:convert';
@@ -6,7 +6,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'add_carlendar.dart';
+import 'add_calendar.dart';
 import 'create_profile.dart';
 import 'manage_profile.dart';
 import 'view_menu.dart';

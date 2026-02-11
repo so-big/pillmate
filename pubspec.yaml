@@ -1,83 +1,68 @@
 name: pillmate
-description: "A new Flutter project."
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+description: "Pillmate – Your Health, Your Reminder. A Flutter medication management app with NFC support."
+publish_to: 'none'
 
-# The following defines the version and build number for your application.
-# A version number is three numbers separated by dots, like 1.2.43
-# followed by an optional build number separated by a +.
-# Both the version and the builder number may be overridden in flutter
-# build by specifying --build-name and --build-number, respectively.
-# In Android, build-name is used as versionName while build-number used as versionCode.
-# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
-# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
-# Read more about iOS versioning at
-# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-# In Windows, build-name is used as the major, minor, and patch parts
-# of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 2.0.0+1
 
 environment:
   sdk: ^3.11.0-90.0.dev
 
-# Dependencies specify other packages that your package needs in order to work.
-# To automatically upgrade your package dependencies to the latest versions
-# consider running `flutter pub upgrade --major-versions`. Alternatively,
-# dependencies can be manually updated by changing the version numbers below to
-# the latest version available on pub.dev. To see which dependencies have newer
-# versions available, run `flutter pub outdated`.
 dependencies:
   flutter:
     sdk: flutter
-  
-  # ย้าย package ที่จำเป็นสำหรับแอปมาไว้ที่นี่
   flutter_localizations:
     sdk: flutter
+
+  # UI
   cupertino_icons: ^1.0.8
+
+  # Storage & Database
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0
+  path: ^1.9.0
   path_provider: ^2.1.3
-  image_picker: ^1.0.0
+  shared_preferences: ^2.2.2
+  flutter_secure_storage: ^9.0.0
+
+  # Security
+  crypto: ^3.0.3
+
+  # NFC
   flutter_nfc_kit: ^3.6.0
   ndef: ^0.3.0
+
+  # Notifications
   flutter_local_notifications: ^18.0.1
   timezone: ^0.10.0
-  sqflite: ^2.3.0  # หรือเวอร์ชั่นล่าสุด
-  path: ^1.9.0
-  sqflite_common_ffi: ^2.3.0
-  audioplayers: ^6.0.0
   flutter_timezone: ^3.0.1
-  fluttertoast: ^8.2.4
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  # (เดิม comment นี้อยู่ผิดที่ แต่ package ถูกย้ายมาแล้ว)
 
+  # Media
+  image_picker: ^1.0.0
+  audioplayers: ^6.0.0
+
+  # State Management
+  flutter_riverpod: ^2.4.9
+
+  # Utilities
+  fluttertoast: ^8.2.4
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # flutter_lints เป็น dev_dependency ถูกต้องแล้ว
   flutter_lints: ^6.0.0
 
-# For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
-
-# The following section is specific to Flutter packages.
 flutter:
-
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
   uses-material-design: true
   assets:
     - assets/
     - assets/simpleProfile/
     - assets/pill/
-    - assets/db/user  
+    - assets/db/user
     - assets/db/appstatus.json
-    - assets/sound_norti/a06_clock_alarm_continue_1.30_min.mp3
-    - assets/sound_norti/a05_clock_alarm_continue_1_min.mp3
-    - assets/sound_norti/a04_clock_alarm_continue_30_sec.mp3
-    - assets/sound_norti/a03_clock_alarm_normal_1.30_min.mp3
-    - assets/sound_norti/a02_clock_alarm_normal_1_min.mp3
-    - assets/sound_norti/a01_clock_alarm_normal_30_sec.mp3
+    - assets/sound_norti/A06_clock_alarm_continue_1.30_min.mp3
+    - assets/sound_norti/A05_clock_alarm_continue_1_min.mp3
+    - assets/sound_norti/A04_clock_alarm_continue_30_sec.mp3
+    - assets/sound_norti/A03_clock_alarm_normal_1.30_min.mp3
+    - assets/sound_norti/A02_clock_alarm_normal_1_min.mp3
+    - assets/sound_norti/A01_clock_alarm_normal_30_sec.mp3

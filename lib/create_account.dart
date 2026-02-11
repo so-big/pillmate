@@ -1,7 +1,6 @@
 // lib/create_account.dart
 
 import 'package:flutter/material.dart';
-import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -9,6 +8,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'database_helper.dart';
+import 'services/auth_service.dart';
 
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({super.key});
@@ -293,7 +293,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       // เตรียมข้อมูลลง SQLite (Master User)
       Map<String, dynamic> newUser = {
         'userid': username,
-        'password': password,
+        'password': AuthService.hashPassword(password), // SHA-256 hashed
         'created_at': DateTime.now().toIso8601String(),
         'image_base64': _selectedBase64Image ?? '',
         'sub_profile': '', // Master User ไม่มี Master (ตัวเอง)

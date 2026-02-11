@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 
 // ✅ เรียกใช้ DatabaseHelper
 import 'database_helper.dart';
+import 'services/auth_service.dart';
 
 class EditMedicinePage extends StatefulWidget {
   final String username;
@@ -177,7 +178,7 @@ class _EditMedicinePageState extends State<EditMedicinePage> {
     try {
       final user = await dbHelper.getUser(widget.username);
       if (user != null) {
-        if (user['password'] == inputPassword) {
+        if (AuthService.verifyPassword(inputPassword, user['password'].toString())) {
           return true;
         }
       }

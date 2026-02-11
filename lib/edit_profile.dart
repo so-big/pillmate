@@ -1,8 +1,7 @@
-// lib/edit_Profile.dart
+// lib/edit_profile.dart
 
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui; // ใช้ ui.instantiateImageCodec
 
 import 'package:flutter/cupertino.dart'; // ใช้ CupertinoPicker
 import 'package:flutter/material.dart';
@@ -11,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 
 // นำเข้า DatabaseHelper
 import 'database_helper.dart';
+import 'services/auth_service.dart';
 
 class EditProfilePage extends StatefulWidget {
   final String username; // Master username (เจ้าของบัญชีหลัก)
@@ -169,7 +169,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       final user = await dbHelper.getUser(widget.username);
       if (user != null) {
-        if (user['password'] == inputPassword) {
+        if (AuthService.verifyPassword(inputPassword, user['password'].toString())) {
           return true;
         }
       }

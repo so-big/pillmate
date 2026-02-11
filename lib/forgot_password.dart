@@ -1,7 +1,8 @@
-// lib/forgotPassword.dart
+// lib/forgot_password.dart
 
 import 'package:flutter/material.dart';
 import 'database_helper.dart'; // Import DatabaseHelper
+import 'services/auth_service.dart'; // Import AuthService
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -179,7 +180,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               try {
                 final Map<String, dynamic> updatedValues = {
                   'userid': _usernameController.text.trim(),
-                  'password': newPassword, // อัปเดตเฉพาะรหัสผ่าน
+                  'password': AuthService.hashPassword(newPassword), // Hash ก่อนบันทึก
                 };
 
                 await dbHelper.updateUser(updatedValues);

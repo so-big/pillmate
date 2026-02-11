@@ -1,48 +1,42 @@
 // lib/main.dart
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-// ✅ Import Plugin
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-import 'forgotPassword.dart';
+import 'forgot_password.dart';
 import 'create_account.dart';
 import 'view_dashboard.dart';
 import 'database_helper.dart';
-import 'nortification_service.dart';
+import 'notification_service.dart';
+import 'services/auth_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. เริ่มต้นระบบแจ้งเตือน
+  // Initialize notifications
   await initializeNotifications();
 
-  // ====================================================================
-  // ✅ NEW: ส่วนขออนุญาต (Permission) แก้ไขให้ถูกต้องสำหรับ v17+
-  // ====================================================================
-
-  // 1. ขออนุญาต Android
+  // Request notification permissions (Android 13+)
   final androidImplementation = flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin
       >();
-
   if (androidImplementation != null) {
     await androidImplementation.requestNotificationsPermission();
   }
 
-  // 2. ขออนุญาต iOS (v17+ ยังใช้ IOSFlutterLocalNotificationsPlugin ในการ resolve ครับ)
+  // Request notification permissions (iOS)
   final iosImplementation = flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
         IOSFlutterLocalNotificationsPlugin
-      >(); // ✅ ใช้ IOS... แทน Darwin...
-
+      >();
   if (iosImplementation != null) {
     await iosImplementation.requestPermissions(
       alert: true,
@@ -51,24 +45,7 @@ void main() async {
     );
   }
 
-  // 3. (แถม) ขออนุญาต macOS (ถ้ามีแผนจะทำลง Mac ด้วย)
-  /*
-  final macosImplementation = flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<
-          MacOSFlutterLocalNotificationsPlugin>();
-          
-  if (macosImplementation != null) {
-    await macosImplementation.requestPermissions(
-      alert: true, 
-      badge: true, 
-      sound: true,
-    );
-  }
-  */
-
-  // ====================================================================
-
-  runApp(const MyApp());
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends StatelessWidget {
@@ -105,16 +82,13 @@ class MyApp extends StatelessWidget {
           prefixIconColor: Colors.grey[600],
         ),
       ),
-
-      // ✅ localizations ภาษาไทย
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [Locale('th', 'TH')],
+      supportedLocales: const [Locale('th', 'TH'), Locale('en', 'US')],
       locale: const Locale('th', 'TH'),
-
       home: const LoginPage(),
     );
   }
@@ -139,28 +113,6 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
   final dbHelper = DatabaseHelper();
 
-  Future<Directory> _appDir() async {
-    return getApplicationDocumentsDirectory();
-  }
-
-  Future<File> _userStatFile() async {
-    final dir = await _appDir();
-    final pillmateDir = Directory('${dir.path}/pillmate');
-    if (!(await pillmateDir.exists())) {
-      await pillmateDir.create(recursive: true);
-    }
-    return File('${dir.path}/pillmate/user-stat.json');
-  }
-
-  Future<File> _appStatusFile() async {
-    final dir = await _appDir();
-    final pillmateDir = Directory('${dir.path}/pillmate');
-    if (!(await pillmateDir.exists())) {
-      await pillmateDir.create(recursive: true);
-    }
-    return File('${dir.path}/pillmate/appstatus.json');
-  }
-
   @override
   void initState() {
     super.initState();
@@ -169,32 +121,23 @@ class _LoginPageState extends State<LoginPage> {
     _loadRememberMeAndMaybeAutoLogin();
   }
 
+  /// Initialize appstatus.json if it doesn't exist (legacy support).
   Future<void> _initializeAppStatusFile() async {
     try {
-      final appStatusFile = await _appStatusFile();
-
+      final dir = await getApplicationDocumentsDirectory();
+      final pillmateDir = Directory('${dir.path}/pillmate');
+      if (!(await pillmateDir.exists())) {
+        await pillmateDir.create(recursive: true);
+      }
+      final appStatusFile = File('${dir.path}/pillmate/appstatus.json');
       if (!(await appStatusFile.exists())) {
-        debugPrint('AppStatus file not found. Copying from assets...');
         final assetContent = await rootBundle.loadString(
           'assets/db/appstatus.json',
         );
         await appStatusFile.writeAsString(assetContent, flush: true);
-        debugPrint(
-          'AppStatus file copied successfully to: ${appStatusFile.path}',
-        );
       }
     } catch (e) {
       debugPrint('Error initializing appstatus.json: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Error: ไม่พบไฟล์ตั้งค่าเริ่มต้น (assets/db/appstatus.json): $e',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 
@@ -204,72 +147,63 @@ class _LoginPageState extends State<LoginPage> {
     });
   }
 
+  /// Load session from secure storage and auto-login if remember-me.
   Future<void> _loadRememberMeAndMaybeAutoLogin() async {
     try {
-      final statFile = await _userStatFile();
-      if (await statFile.exists()) {
-        final content = await statFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          final data = jsonDecode(content);
-          if (data is Map) {
-            final remember = data['rememberMe'] == true;
-            final username = data['username']?.toString() ?? '';
-            final password = data['password']?.toString() ?? '';
+      final savedUsername = await AuthService.loadSession();
+      if (savedUsername != null && savedUsername.isNotEmpty) {
+        setState(() {
+          _rememberMe = true;
+          _usernameController.text = savedUsername;
+        });
 
-            setState(() {
-              _rememberMe = remember;
-              _usernameController.text = username;
-              _passwordController.text = password;
-            });
-
-            _validatePasswordLength();
-
-            if (remember && username.isNotEmpty && password.isNotEmpty) {
-              _handleLogin(auto: true);
-            }
-          }
+        // Auto-login: verify the user still exists in DB
+        final user = await dbHelper.getUser(savedUsername);
+        if (user != null && mounted) {
+          setState(() {
+            _isLoading = false;
+            _message = '';
+          });
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DashboardPage(username: savedUsername),
+            ),
+          );
         }
       }
     } catch (e) {
-      debugPrint('Error loading user-stat.json: $e');
+      debugPrint('Error loading session: $e');
     }
   }
 
-  Future<void> _saveUserStat({
-    required String username,
-    required String password,
-    required bool rememberMe,
-  }) async {
-    try {
-      final file = await _userStatFile();
-      final data = {
-        'username': username,
-        'password': password,
-        'rememberMe': rememberMe,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-      await file.writeAsString(jsonEncode(data));
-    } catch (e) {
-      debugPrint('Error saving user-stat.json: $e');
-    }
-  }
-
+  /// Authenticate user with hashed password comparison.
   Future<Map<String, dynamic>?> _findUser(
     String username,
     String password,
   ) async {
     try {
       final user = await dbHelper.getUser(username);
-      if (user == null) {
-        return null;
-      }
-      if (user['password'] == password) {
+      if (user == null) return null;
+
+      final storedPassword = (user['password'] ?? '').toString();
+
+      // Verify password (supports both hashed and legacy plaintext)
+      if (AuthService.verifyPassword(password, storedPassword)) {
+        // If the stored password is still plaintext, migrate it to hash
+        if (!AuthService.isPasswordHashed(storedPassword)) {
+          final hashed = AuthService.hashPassword(password);
+          await dbHelper.updateUser({
+            'userid': username,
+            'password': hashed,
+          });
+          debugPrint('Migrated password for user "$username" to SHA-256');
+        }
         return user;
-      } else {
-        return null;
       }
+      return null;
     } catch (e) {
-      debugPrint('Error reading from SQLite: $e');
+      debugPrint('Error authenticating user: $e');
       return null;
     }
   }
@@ -285,7 +219,6 @@ class _LoginPageState extends State<LoginPage> {
         });
         return;
       }
-
       if (username.isEmpty || password.isEmpty) {
         setState(() {
           _message = 'กรุณากรอก Username และ Password';
@@ -306,16 +239,14 @@ class _LoginPageState extends State<LoginPage> {
     if (user == null) {
       setState(() {
         _isLoading = false;
-        if (!auto) {
-          _message = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
-        }
+        if (!auto) _message = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
       });
       return;
     }
 
-    await _saveUserStat(
+    // Save session securely (no password stored!)
+    await AuthService.saveSession(
       username: username,
-      password: password,
       rememberMe: _rememberMe,
     );
 

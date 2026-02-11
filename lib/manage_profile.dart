@@ -4,13 +4,13 @@ import 'dart:convert';
 // import 'dart:io'; // ไม่ได้ใช้แล้ว เพราะเปลี่ยนไปใช้ DB
 // import 'package:path_provider/path_provider.dart'; // ไม่ได้ใช้แล้ว
 
-import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart'; // ต้อง import เพื่อใช้ object Database
+import 'package:flutter/material.dart'; // ต้อง import เพื่อใช้ object Database
 
 import 'create_profile.dart';
 import 'edit_account.dart';
-import 'edit_Profile.dart';
+import 'edit_profile.dart';
 import 'database_helper.dart'; // ✅ เรียกใช้ DatabaseHelper
+import 'services/auth_service.dart';
 
 class manage_profilePage extends StatefulWidget {
   final String username;
@@ -80,8 +80,8 @@ class _manage_profilePageState extends State<manage_profilePage> {
       final user = await dbHelper.getUser(widget.username);
 
       if (user != null) {
-        // เช็คว่ารหัสผ่านตรงกันหรือไม่
-        if (user['password'] == passwordInput) {
+        // เช็คว่ารหัสผ่านตรงกันหรือไม่ (supports hashed + legacy)
+        if (AuthService.verifyPassword(passwordInput, user['password'].toString())) {
           return true;
         }
       }

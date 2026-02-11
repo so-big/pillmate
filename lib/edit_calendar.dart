@@ -1,4 +1,4 @@
-// lib/edit_carlendar.dart
+// lib/edit_calendar.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'create_profile.dart';
 import 'add_medicine.dart';
 import 'database_helper.dart';
+import 'services/auth_service.dart';
 
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:ndef/ndef.dart' as ndef;
@@ -686,14 +687,12 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     return '$hour:$minute';
   }
 
-  // ✅ ฟังก์ชันช่วยตรวจสอบรหัสผ่าน
+  // ✅ ฟังก์ชันช่วยตรวจสอบรหัสผ่าน (with hash support)
   Future<bool> _verifyPassword(String inputPassword) async {
     try {
       final user = await dbHelper.getUser(widget.username);
       if (user != null) {
-        if (user['password'] == inputPassword) {
-          return true;
-        }
+        return AuthService.verifyPassword(inputPassword, user['password'].toString());
       }
     } catch (e) {
       debugPrint('Verify password error: $e');

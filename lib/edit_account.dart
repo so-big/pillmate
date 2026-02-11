@@ -11,6 +11,7 @@ import 'package:flutter/cupertino.dart'; // เพิ่ม import เพื่�
 
 // 1. นำเข้า DatabaseHelper
 import 'database_helper.dart';
+import 'services/auth_service.dart';
 
 class EditAccountPage extends StatefulWidget {
   final String username;
@@ -247,11 +248,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
     return child;
   }
 
-  // 4. แก้ไขการตรวจสอบรหัสผ่านเดิมจาก SQLite
+  // 4. แก้ไขการตรวจสอบรหัสผ่านเดิมจาก SQLite (with hash support)
   Future<bool> _validateOldPassword(String oldPassword) async {
     try {
       final user = await dbHelper.getUser(widget.username);
-      if (user != null && user['password'] == oldPassword) {
+      if (user != null && AuthService.verifyPassword(oldPassword, user['password'].toString())) {
         return true;
       }
       return false;
@@ -567,9 +568,9 @@ class _EditAccountPageState extends State<EditAccountPage> {
         _accountUser!,
       );
 
-      // อัปเดตรหัสผ่านถ้ามีการเปลี่ยน
+      // อัปเดตรหัสผ่านถ้ามีการเปลี่ยน (hash ก่อนบันทึก)
       if (newPassword != null) {
-        updatedUser['password'] = newPassword;
+        updatedUser['password'] = AuthService.hashPassword(newPassword);
       }
 
       // อัปเดตรูปภาพโดยใช้ key 'image_base64'

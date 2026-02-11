@@ -12,7 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'database_helper.dart';
 
 // ✅ เรียกใช้หน้า setting ที่สร้างใหม่
-import 'nortification_setting.dart';
+import 'notification_setting.dart';
 
 // ❌ ลบตัวแปรเทสต์แจ้งเตือน (norti_test) ทิ้ง
 // ❌ ลบโค้ดฟังก์ชันทั้งหมดที่เกี่ยวข้องกับการทดสอบแจ้งเตือน (_initTestNotifications, _showTestAlarm) ทิ้ง
