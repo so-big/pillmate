@@ -61,6 +61,29 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
   // Database Helper Instance
   final dbHelper = DatabaseHelper();
 
+  bool get _canUseMinuteIntervals {
+    final username = widget.username.trim().toLowerCase();
+    return username == 'jatsadat' || username == 'admin';
+  }
+
+  List<int> get _allowedIntervalMinutes {
+    final hourOptions = List<int>.generate(23, (index) => (index + 2) * 60);
+    if (!_canUseMinuteIntervals) return hourOptions;
+    final minuteOptions = List<int>.generate(9, (index) => index + 2);
+    return [...minuteOptions, ...hourOptions];
+  }
+
+  int _normalizeIntervalMinutes(int value) {
+    final options = _allowedIntervalMinutes;
+    if (options.contains(value)) return value;
+
+    return options.reduce((closest, option) {
+      final closestDistance = (closest - value).abs();
+      final optionDistance = (option - value).abs();
+      return optionDistance < closestDistance ? option : closest;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -81,7 +104,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         ? (DateTime.tryParse(endStr) ?? _startDateTime)
         : _startDateTime;
 
-    _notifyMode = r['notifyMode']?.toString() ?? (r['notifyByMeal'] == true ? 'meal' : 'interval');
+    _notifyMode =
+        r['notifyMode']?.toString() ??
+        (r['notifyByMeal'] == true ? 'meal' : 'interval');
 
     int intervalMinutes =
         int.tryParse(r['intervalMinutes']?.toString() ?? '') ?? 0;
@@ -95,7 +120,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     if (intervalMinutes > 24 * 60) {
       intervalMinutes = 24 * 60;
     }
-    _intervalMinutes = intervalMinutes;
+    _intervalMinutes = _normalizeIntervalMinutes(intervalMinutes);
 
     _selectedMedicineId = r['medicineId']?.toString();
 
@@ -292,7 +317,9 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
   List<Widget> _buildMedicinePropertiesSection() {
     Map<String, dynamic>? med;
     try {
-      med = _medicines.firstWhere((m) => m['id']?.toString() == _selectedMedicineId);
+      med = _medicines.firstWhere(
+        (m) => m['id']?.toString() == _selectedMedicineId,
+      );
     } catch (_) {
       med = null;
     }
@@ -359,7 +386,11 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Icon(Icons.restaurant_menu, color: Colors.orange, size: 16),
+                const Icon(
+                  Icons.restaurant_menu,
+                  color: Colors.orange,
+                  size: 16,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   'การทานยา: $mealLabel',
@@ -614,14 +645,18 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
   }
 
   String _formatIntervalLabel() {
-    final h = _intervalMinutes ~/ 60;
-    final m = _intervalMinutes % 60;
-    return '${h.toString().padLeft(2, '0')}.${m.toString().padLeft(2, '0')}';
+    final total = _normalizeIntervalMinutes(_intervalMinutes);
+    if (total < 60) return '$total นาที';
+    if (total == 24 * 60) return 'วันละครั้ง';
+    return '${total ~/ 60} ชั่วโมง';
   }
 
   Future<void> _pickIntervalMinutes() async {
-    int tempHour = _intervalMinutes ~/ 60;
-    int tempMinute = _intervalMinutes % 60;
+    final options = _allowedIntervalMinutes;
+    int selectedInterval = _normalizeIntervalMinutes(_intervalMinutes);
+    final initialItem = options
+        .indexOf(selectedInterval)
+        .clamp(0, options.length - 1);
 
     await showModalBottomSheet(
       context: context,
@@ -654,7 +689,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                 ),
               ),
               const Text(
-                'เลือกช่วงเวลาห่างในการแจ้งเตือน (ชั่วโมง.นาที)',
+                'เลือกระยะช่วงเวลาที่จะแจ้งเตือน',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 16,
@@ -664,65 +699,50 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                          initialItem: tempHour.clamp(0, 24),
-                        ),
-                        itemExtent: 32,
-                        magnification: 1.1,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) {
-                          tempHour = index;
-                        },
-                        children: List.generate(
-                          25,
-                          (i) => Center(
-                            child: Text(
-                              i.toString().padLeft(2, '0'),
-                              style: const TextStyle(
-                                fontSize: 18,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ),
+                child: CupertinoPicker(
+                  scrollController: FixedExtentScrollController(
+                    initialItem: initialItem,
+                  ),
+                  itemExtent: 38,
+                  magnification: 1.1,
+                  useMagnifier: true,
+                  onSelectedItemChanged: (index) {
+                    selectedInterval = options[index];
+                  },
+                  children: options.map((minutes) {
+                    final label = minutes < 60
+                        ? '$minutes นาที'
+                        : minutes == 24 * 60
+                        ? 'วันละครั้ง'
+                        : '${minutes ~/ 60} ชั่วโมง';
+                    return Center(
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          color: Colors.black,
                         ),
                       ),
-                    ),
-                    const Text(
-                      ':',
-                      style: TextStyle(fontSize: 18, color: Colors.black87),
-                    ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                          initialItem: tempMinute.clamp(0, 59),
-                        ),
-                        itemExtent: 32,
-                        magnification: 1.1,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) {
-                          tempMinute = index;
-                        },
-                        children: List.generate(
-                          60,
-                          (i) => Center(
-                            child: Text(
-                              i.toString().padLeft(2, '0'),
-                              style: const TextStyle(
-                                fontSize: 18,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                    );
+                  }).toList(),
                 ),
               ),
+              if (_canUseMinuteIntervals)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'ตัวเลือกนาทีแสดงเฉพาะผู้ใช้ jatsadat และ admin',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                )
+              else
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'เลือกได้ตั้งแต่ 2 ชั่วโมง ถึง 24 ชั่วโมง',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -733,12 +753,8 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                   const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: () {
-                      int total = tempHour * 60 + tempMinute;
-                      if (total <= 0) total = 1;
-                      if (total > 24 * 60) total = 24 * 60;
-
                       setState(() {
-                        _intervalMinutes = total;
+                        _intervalMinutes = selectedInterval;
                       });
                       Navigator.pop(ctx);
                     },
@@ -775,7 +791,10 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
     try {
       final user = await dbHelper.getUser(widget.username);
       if (user != null) {
-        return AuthService.verifyPassword(inputPassword, user['password'].toString());
+        return AuthService.verifyPassword(
+          inputPassword,
+          user['password'].toString(),
+        );
       }
     } catch (e) {
       debugPrint('Verify password error: $e');
@@ -1161,6 +1180,7 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
       final reminderId =
           original['id']?.toString() ?? now.millisecondsSinceEpoch.toString();
       final db = await dbHelper.database;
+      final intervalMinutes = _normalizeIntervalMinutes(_intervalMinutes);
 
       final Map<String, dynamic> row = {
         'createby': widget.username,
@@ -1175,8 +1195,8 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
         'notify_by_time': _notifyMode == 'interval' ? 1 : 0,
         'notify_by_meal': _notifyMode == 'meal' ? 1 : 0,
         'notify_mode': _notifyMode,
-        'interval_minutes': _intervalMinutes,
-        'interval_hours': (_intervalMinutes / 60).round(),
+        'interval_minutes': intervalMinutes,
+        'interval_hours': (intervalMinutes / 60).round(),
         'et': et,
         'nfc_id': nfcTagId,
         'payload': payloadText,
@@ -1652,13 +1672,14 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
               const SizedBox(height: 16),
 
               // สรรพคุณยา (Medicine Properties)
-              if (_selectedMedicineId != null) ..._buildMedicinePropertiesSection(),
+              if (_selectedMedicineId != null)
+                ..._buildMedicinePropertiesSection(),
 
               const SizedBox(height: 16),
 
               if (_notifyMode == 'interval') ...[
                 const Text(
-                  'ระยะช่วงเวลาที่จะแจ้งเตือน (ชั่วโมง.นาที)',
+                  'ระยะช่วงเวลาที่จะแจ้งเตือน',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -1680,11 +1701,8 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                   ),
                   icon: const Icon(Icons.schedule, color: Colors.black87),
                   label: Text(
-                    'ทุก ${_formatIntervalLabel()} ชั่วโมง',
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      fontSize: 14,
-                    ),
+                    'ทุก ${_formatIntervalLabel()}',
+                    style: const TextStyle(color: Colors.black87, fontSize: 14),
                   ),
                 ),
               ],
@@ -1699,12 +1717,19 @@ class _CarlendarEditSheetState extends State<CarlendarEditSheet> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.restaurant, color: Colors.teal, size: 20),
+                      const Icon(
+                        Icons.restaurant,
+                        color: Colors.teal,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'ระบบจะแจ้งเตือนตามเวลามื้ออาหารที่ตั้งไว้ในโปรไฟล์ (เช้า/กลางวัน/เย็น/ก่อนนอน)',
-                          style: TextStyle(color: Colors.teal[800], fontSize: 13),
+                          style: TextStyle(
+                            color: Colors.teal[800],
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],

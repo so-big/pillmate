@@ -43,7 +43,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
   DateTime _endDateTime = DateTime.now();
   // notify_mode: 'interval' (ตามเวลา) หรือ 'meal' (ตามมื้ออาหาร)
   String _notifyMode = 'interval';
-  int _intervalMinutes = 4 * 60;
+  int _intervalMinutes = 6 * 60;
   List<Map<String, dynamic>> _medicines = [];
   String? _selectedMedicineId;
   bool _isLoadingMedicines = false;
@@ -51,10 +51,35 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
   bool _isNfcEnabled = false;
   final dbHelper = DatabaseHelper();
 
+  bool get _canUseMinuteIntervals {
+    final username = widget.username.trim().toLowerCase();
+    return username == 'jatsadat' || username == 'admin';
+  }
+
+  List<int> get _allowedIntervalMinutes {
+    final hourOptions = List<int>.generate(23, (index) => (index + 2) * 60);
+    if (!_canUseMinuteIntervals) return hourOptions;
+    final minuteOptions = List<int>.generate(9, (index) => index + 2);
+    return [...minuteOptions, ...hourOptions];
+  }
+
+  int _normalizeIntervalMinutes(int value) {
+    final options = _allowedIntervalMinutes;
+    if (options.contains(value)) return value;
+
+    return options.reduce((closest, option) {
+      final closestDistance = (closest - value).abs();
+      final optionDistance = (option - value).abs();
+      return optionDistance < closestDistance ? option : closest;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _endDateTime = _startDateTime;
+    final now = DateTime.now();
+    _startDateTime = now;
+    _endDateTime = now.add(const Duration(days: 5));
     _loadProfiles();
     _loadMedicines();
     _loadNfcStatus();
@@ -148,7 +173,9 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
       );
       // Debug: แสดงค่า before_meal/after_meal ของแต่ละยา
       for (final m in result) {
-        debugPrint('💊 _loadMedicines: id=${m['id']}, name=${m['name']}, before_meal=${m['before_meal']}, after_meal=${m['after_meal']}');
+        debugPrint(
+          '💊 _loadMedicines: id=${m['id']}, name=${m['name']}, before_meal=${m['before_meal']}, after_meal=${m['after_meal']}',
+        );
       }
       setState(() {
         _medicines = List<Map<String, dynamic>>.from(result);
@@ -449,14 +476,18 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
   }
 
   String _formatIntervalLabel() {
-    final h = _intervalMinutes ~/ 60;
-    final m = _intervalMinutes % 60;
-    return '${h.toString().padLeft(2, '0')}.${m.toString().padLeft(2, '0')}';
+    final total = _normalizeIntervalMinutes(_intervalMinutes);
+    if (total < 60) return '$total นาที';
+    if (total == 24 * 60) return 'วันละครั้ง';
+    return '${total ~/ 60} ชั่วโมง';
   }
 
   Future<void> _pickIntervalMinutes() async {
-    int tempHour = _intervalMinutes ~/ 60;
-    int tempMinute = _intervalMinutes % 60;
+    final options = _allowedIntervalMinutes;
+    int selectedInterval = _normalizeIntervalMinutes(_intervalMinutes);
+    final initialItem = options
+        .indexOf(selectedInterval)
+        .clamp(0, options.length - 1);
 
     await showModalBottomSheet(
       context: context,
@@ -489,7 +520,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
                 ),
               ),
               const Text(
-                'เลือกช่วงเวลาห่างในการแจ้งเตือน (ชั่วโมง.นาที)',
+                'เลือกระยะช่วงเวลาที่จะแจ้งเตือน',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 16,
@@ -499,65 +530,50 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                          initialItem: tempHour.clamp(0, 24),
-                        ),
-                        itemExtent: 32,
-                        magnification: 1.1,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) {
-                          tempHour = index;
-                        },
-                        children: List.generate(
-                          25, // 0..24
-                          (i) => Center(
-                            child: Text(
-                              i.toString().padLeft(2, '0'),
-                              style: const TextStyle(
-                                fontSize: 18,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ),
+                child: CupertinoPicker(
+                  scrollController: FixedExtentScrollController(
+                    initialItem: initialItem,
+                  ),
+                  itemExtent: 38,
+                  magnification: 1.1,
+                  useMagnifier: true,
+                  onSelectedItemChanged: (index) {
+                    selectedInterval = options[index];
+                  },
+                  children: options.map((minutes) {
+                    final label = minutes < 60
+                        ? '$minutes นาที'
+                        : minutes == 24 * 60
+                        ? 'วันละครั้ง'
+                        : '${minutes ~/ 60} ชั่วโมง';
+                    return Center(
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          color: Colors.black,
                         ),
                       ),
-                    ),
-                    const Text(
-                      ':',
-                      style: TextStyle(fontSize: 18, color: Colors.black87),
-                    ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                          initialItem: tempMinute.clamp(0, 59),
-                        ),
-                        itemExtent: 32,
-                        magnification: 1.1,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) {
-                          tempMinute = index;
-                        },
-                        children: List.generate(
-                          60,
-                          (i) => Center(
-                            child: Text(
-                              i.toString().padLeft(2, '0'),
-                              style: const TextStyle(
-                                fontSize: 18,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                    );
+                  }).toList(),
                 ),
               ),
+              if (_canUseMinuteIntervals)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'ตัวเลือกนาทีแสดงเฉพาะผู้ใช้ jatsadat และ admin',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                )
+              else
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'เลือกได้ตั้งแต่ 2 ชั่วโมง ถึง 24 ชั่วโมง',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -568,12 +584,8 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
                   const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: () {
-                      int total = tempHour * 60 + tempMinute;
-                      if (total <= 0) total = 1;
-                      if (total > 24 * 60) total = 24 * 60;
-
                       setState(() {
-                        _intervalMinutes = total;
+                        _intervalMinutes = selectedInterval;
                       });
                       Navigator.pop(ctx);
                     },
@@ -678,7 +690,11 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Icon(Icons.restaurant_menu, color: Colors.orange, size: 16),
+                const Icon(
+                  Icons.restaurant_menu,
+                  color: Colors.orange,
+                  size: 16,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   'การทานยา: $mealLabel',
@@ -736,19 +752,29 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     bool beforeMeal = (med['before_meal'] == 1);
     bool afterMeal = (med['after_meal'] == 1);
 
-    debugPrint('🔍 _handleSave: medicine before_meal=${med['before_meal']} (${med['before_meal'].runtimeType}), after_meal=${med['after_meal']} (${med['after_meal'].runtimeType})');
-    debugPrint('🔍 _handleSave: parsed beforeMeal=$beforeMeal, afterMeal=$afterMeal');
+    debugPrint(
+      '🔍 _handleSave: medicine before_meal=${med['before_meal']} (${med['before_meal'].runtimeType}), after_meal=${med['after_meal']} (${med['after_meal'].runtimeType})',
+    );
+    debugPrint(
+      '🔍 _handleSave: parsed beforeMeal=$beforeMeal, afterMeal=$afterMeal',
+    );
 
     if (!beforeMeal && !afterMeal) {
       beforeMeal = true;
       afterMeal = false;
-      debugPrint('🔍 _handleSave: FALLBACK -> beforeMeal=true (ทั้งคู่เป็น false)');
+      debugPrint(
+        '🔍 _handleSave: FALLBACK -> beforeMeal=true (ทั้งคู่เป็น false)',
+      );
     } else if (beforeMeal && afterMeal) {
       afterMeal = false;
-      debugPrint('🔍 _handleSave: OVERRIDE -> afterMeal=false (ทั้งคู่เป็น true)');
+      debugPrint(
+        '🔍 _handleSave: OVERRIDE -> afterMeal=false (ทั้งคู่เป็น true)',
+      );
     }
 
-    debugPrint('🔍 _handleSave: FINAL beforeMeal=$beforeMeal, afterMeal=$afterMeal');
+    debugPrint(
+      '🔍 _handleSave: FINAL beforeMeal=$beforeMeal, afterMeal=$afterMeal',
+    );
 
     final flag = beforeMeal ? '1' : '2';
 
@@ -895,6 +921,7 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
     try {
       final now = DateTime.now();
       final db = await dbHelper.database;
+      final intervalMinutes = _normalizeIntervalMinutes(_intervalMinutes);
 
       final Map<String, dynamic> row = {
         'id': now.millisecondsSinceEpoch.toString(),
@@ -910,15 +937,17 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
         'notify_by_time': _notifyMode == 'interval' ? 1 : 0,
         'notify_by_meal': _notifyMode == 'meal' ? 1 : 0,
         'notify_mode': _notifyMode,
-        'interval_minutes': _intervalMinutes,
-        'interval_hours': (_intervalMinutes / 60).round(),
+        'interval_minutes': intervalMinutes,
+        'interval_hours': (intervalMinutes / 60).round(),
         'et': et,
         'nfc_id': nfcTagId,
         'payload': payloadText,
         'created_at': now.toIso8601String(),
       };
 
-      debugPrint('📝 calendar_alerts INSERT: medicine_before_meal=${row['medicine_before_meal']}, medicine_after_meal=${row['medicine_after_meal']}, notify_mode=${row['notify_mode']}');
+      debugPrint(
+        '📝 calendar_alerts INSERT: medicine_before_meal=${row['medicine_before_meal']}, medicine_after_meal=${row['medicine_after_meal']}, notify_mode=${row['notify_mode']}',
+      );
 
       await db.insert('calendar_alerts', row);
 
@@ -1369,14 +1398,15 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
               const SizedBox(height: 16),
 
               // สรรพคุณยา (Medicine Properties)
-              if (_selectedMedicineId != null) ..._buildMedicinePropertiesSection(),
+              if (_selectedMedicineId != null)
+                ..._buildMedicinePropertiesSection(),
 
               const SizedBox(height: 16),
 
               // ระยะช่วงเวลาที่จะแจ้งเตือน (แสดงเฉพาะโหมด interval)
               if (_notifyMode == 'interval') ...[
                 const Text(
-                  'ระยะช่วงเวลาที่จะแจ้งเตือน (ชั่วโมง.นาที)',
+                  'ระยะช่วงเวลาที่จะแจ้งเตือน',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -1398,11 +1428,8 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
                   ),
                   icon: const Icon(Icons.schedule, color: Colors.black87),
                   label: Text(
-                    'ทุก ${_formatIntervalLabel()} ชั่วโมง',
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      fontSize: 14,
-                    ),
+                    'ทุก ${_formatIntervalLabel()}',
+                    style: const TextStyle(color: Colors.black87, fontSize: 14),
                   ),
                 ),
               ],
@@ -1418,12 +1445,19 @@ class _CarlendarAddSheetState extends State<CarlendarAddSheet> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.restaurant, color: Colors.teal, size: 20),
+                      const Icon(
+                        Icons.restaurant,
+                        color: Colors.teal,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'ระบบจะแจ้งเตือนตามเวลามื้ออาหารที่ตั้งไว้ในโปรไฟล์ (เช้า/กลางวัน/เย็น/ก่อนนอน)',
-                          style: TextStyle(color: Colors.teal[800], fontSize: 13),
+                          style: TextStyle(
+                            color: Colors.teal[800],
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],
