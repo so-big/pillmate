@@ -108,6 +108,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   String _message = '';
   bool _isPasswordValid = false;
+  bool _obscurePassword = true;
 
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -193,10 +194,7 @@ class _LoginPageState extends State<LoginPage> {
         // If the stored password is still plaintext, migrate it to hash
         if (!AuthService.isPasswordHashed(storedPassword)) {
           final hashed = AuthService.hashPassword(password);
-          await dbHelper.updateUser({
-            'userid': username,
-            'password': hashed,
-          });
+          await dbHelper.updateUser({'userid': username, 'password': hashed});
           debugPrint('Migrated password for user "$username" to SHA-256');
         }
         return user;
@@ -245,10 +243,7 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     // Save session securely (no password stored!)
-    await AuthService.saveSession(
-      username: username,
-      rememberMe: _rememberMe,
-    );
+    await AuthService.saveSession(username: username, rememberMe: _rememberMe);
 
     setState(() {
       _isLoading = false;
@@ -315,23 +310,28 @@ class _LoginPageState extends State<LoginPage> {
                   decoration: const InputDecoration(
                     hintText: 'Username',
                     prefixIcon: Icon(Icons.person_outline),
-                    suffixIcon: Icon(
-                      Icons.lock_outline,
-                      color: Color(0xFF9E9E9E),
-                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
                 TextField(
                   controller: _passwordController,
-                  obscureText: true,
+                  obscureText: _obscurePassword,
                   style: const TextStyle(color: Colors.black),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     hintText: 'Password',
-                    prefixIcon: Icon(Icons.lock_outline),
-                    suffixIcon: Icon(
-                      Icons.lock_outline,
-                      color: Color(0xFF9E9E9E),
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                        color: const Color(0xFF9E9E9E),
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
                     ),
                   ),
                 ),
