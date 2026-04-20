@@ -125,13 +125,14 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           }
 
           if (data['time_mode_snooze_duration'] != null) {
-            int val = data['time_mode_snooze_duration'];
-            // ✅ เปลี่ยน Min validation: 3 -> 2
-            if (val < 2) val = 2;
-            _timeModeSnoozeDuration = val;
+            final val =
+                int.tryParse(data['time_mode_snooze_duration'].toString()) ?? 2;
+            _timeModeSnoozeDuration = val.clamp(2, 15);
           }
           if (data['time_mode_repeat_count'] != null) {
-            _timeModeRepeatCount = data['time_mode_repeat_count'];
+            final val =
+                int.tryParse(data['time_mode_repeat_count'].toString()) ?? 1;
+            _timeModeRepeatCount = val.clamp(1, 3);
           }
         }
       }
@@ -282,11 +283,9 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               Expanded(
                 child: Slider(
                   value: _timeModeSnoozeDuration.toDouble(),
-                  // ✅ เปลี่ยน Min value: 3 -> 2
                   min: 2,
-                  max: 60,
-                  // ✅ เปลี่ยน Divisions: 57 -> 58
-                  divisions: 58,
+                  max: 15,
+                  divisions: 13,
                   label: '$_timeModeSnoozeDuration นาที',
                   activeColor: Colors.teal,
                   onChanged: (val) {
@@ -303,27 +302,40 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             ],
           ),
           const Text(
-            // ✅ เปลี่ยน Note: 3 -> 2
-            '* ต่ำสุด 2 นาที',
+            '* ต่ำสุด 2 นาที สูงสุด 15 นาที',
             style: TextStyle(color: Colors.grey, fontSize: 12),
           ),
 
           const SizedBox(height: 24),
 
-          // 3. จำนวนครั้งการย้ำเตือน
-          const Text('จำนวนครั้งการย้ำเตือน', style: TextStyle(fontSize: 16)),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(8),
+          // 3. จำนวนครั้งการแจ้งเตือน
+          const Text(
+            'จำนวนครั้งการแจ้งเตือน',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'จำนวนครั้งการแจ้งเตือน',
+              labelStyle: const TextStyle(color: Colors.teal),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Colors.grey),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Colors.teal),
+              ),
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<int>(
                 value: _timeModeRepeatCount,
                 isExpanded: true,
-                items: List.generate(10, (index) {
+                items: List.generate(3, (index) {
                   int count = index + 1;
                   return DropdownMenuItem(
                     value: count,
