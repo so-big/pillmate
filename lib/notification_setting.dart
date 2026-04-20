@@ -1,5 +1,6 @@
 // lib/notification_setting.dart
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -188,12 +189,67 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       await file.writeAsString(jsonEncode(data));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('บันทึกการตั้งค่าเรียบร้อยแล้ว')),
-        );
+        await _showSaveProgressAndReturn();
       }
     } catch (e) {
       debugPrint('Error saving settings: $e');
+    }
+  }
+
+  Future<void> _showSaveProgressAndReturn() async {
+    final pageNavigator = Navigator.of(context);
+    final dailyNotificationContext = pageNavigator.context;
+
+    await _showTimedStatusDialog(
+      context: context,
+      icon: Icons.hourglass_top,
+      message: 'กำลังบันทึกการตั้งค่า',
+      detail: 'โปรดรอสักครู่...',
+      showProgress: true,
+    );
+
+    if (!mounted) return;
+
+    pageNavigator.popUntil((route) => route.isFirst);
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    if (!dailyNotificationContext.mounted) return;
+
+    await _showTimedStatusDialog(
+      context: dailyNotificationContext,
+      icon: Icons.check_circle_outline,
+      message: 'บันทึกการตั้งค่าเรียบร้อยแล้ว',
+      detail: 'กลับสู่หน้าการแจ้งเตือนรายวันแล้ว',
+      showProgress: false,
+    );
+  }
+
+  Future<void> _showTimedStatusDialog({
+    required BuildContext context,
+    required IconData icon,
+    required String message,
+    required String detail,
+    required bool showProgress,
+  }) async {
+    final dialogNavigator = Navigator.of(context, rootNavigator: true);
+
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _StatusDialog(
+          icon: icon,
+          message: message,
+          detail: detail,
+          showProgress: showProgress,
+        ),
+      ),
+    );
+
+    await Future.delayed(const Duration(seconds: 1));
+
+    if (dialogNavigator.canPop()) {
+      dialogNavigator.pop();
     }
   }
 
@@ -418,6 +474,85 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _StatusDialog extends StatelessWidget {
+  final IconData icon;
+  final String message;
+  final String detail;
+  final bool showProgress;
+
+  const _StatusDialog({
+    required this.icon,
+    required this.message,
+    required this.detail,
+    required this.showProgress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: const BoxDecoration(
+                color: Color(0xFFE9EEF5),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(4)),
+              ),
+              child: const Text(
+                'Pillmate',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(icon, color: Colors.teal, size: 32),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          message,
+                          style: const TextStyle(
+                            color: Colors.black87,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (showProgress) ...const [
+                    SizedBox(height: 18),
+                    LinearProgressIndicator(
+                      minHeight: 6,
+                      color: Colors.teal,
+                      backgroundColor: Color(0xFFE0E0E0),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Text(detail, style: const TextStyle(color: Colors.black54)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
