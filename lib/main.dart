@@ -22,6 +22,14 @@ void main() async {
 
   // Initialize notifications
   await initializeNotifications();
+  await flutterLocalNotificationsPlugin.cancelAll();
+  try {
+    await const MethodChannel(
+      'pillmate/native_notifications',
+    ).invokeMethod<bool>('cancelAll');
+  } catch (e) {
+    debugPrint('Main: native notification cleanup failed: $e');
+  }
 
   // Request notification permissions (Android 13+)
   final androidImplementation = flutterLocalNotificationsPlugin

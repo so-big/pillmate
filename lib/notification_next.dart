@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:path_provider/path_provider.dart';
@@ -43,6 +44,10 @@ class NortificationSetup {
   static final FlutterLocalNotificationsPlugin _flnp =
       FlutterLocalNotificationsPlugin();
 
+  static const MethodChannel _nativeNotifications = MethodChannel(
+    'pillmate/native_notifications',
+  );
+
   static const Set<String> _availableRawSounds = {
     'a01_clock_alarm_normal_30_sec',
     'a02_clock_alarm_normal_1_min',
@@ -69,6 +74,9 @@ class NortificationSetup {
         ? fileName
         : 'a01_clock_alarm_normal_30_sec';
   }
+
+  static String _channelIdForSound(String soundName) =>
+      'pillmate_native_alarm_v1_$soundName';
 
   // ------------ INIT PLUGIN ------------
 
@@ -157,8 +165,8 @@ class NortificationSetup {
 
       if (advanceStr != null || afterStr != null || gapStr != null) {
         return (
-          advance: int.tryParse(advanceStr ?? '30') ?? 30,
-          after: int.tryParse(afterStr ?? '30') ?? 30,
+          advance: int.tryParse(advanceStr ?? '0') ?? 0,
+          after: int.tryParse(afterStr ?? '0') ?? 0,
           playDuration: int.tryParse(playDurStr ?? '1') ?? 1,
           gap: int.tryParse(gapStr ?? '5') ?? 5,
         );
@@ -171,9 +179,8 @@ class NortificationSetup {
         if (content.trim().isNotEmpty) {
           final map = jsonDecode(content);
           if (map is Map<String, dynamic>) {
-            final advance =
-                int.tryParse('${map['advanceMinutes'] ?? 30}') ?? 30;
-            final after = int.tryParse('${map['afterMinutes'] ?? 30}') ?? 30;
+            final advance = int.tryParse('${map['advanceMinutes'] ?? 0}') ?? 0;
+            final after = int.tryParse('${map['afterMinutes'] ?? 0}') ?? 0;
             final playDur =
                 int.tryParse('${map['playDurationMinutes'] ?? 1}') ?? 1;
             final gap = int.tryParse('${map['repeatGapMinutes'] ?? 5}') ?? 5;
@@ -189,12 +196,14 @@ class NortificationSetup {
     } catch (e) {
       debugPrint('NortificationSetup: read settings error $e');
     }
-    // default: ล่วงหน้า 30 นาที หลังถึงเวลา 30 นาที เล่น 1 นาที, เว้น 5 นาที
-    return (advance: 30, after: 30, playDuration: 1, gap: 5);
+    // default: time-mode notifications fire exactly at the card time.
+    return (advance: 0, after: 0, playDuration: 1, gap: 5);
   }
 
   /// อ่านตั้งค่าเสียง + repeat count จาก appstatus.json
-  static Future<Map<String, dynamic>> _readSoundSettings() async {
+  static Future<Map<String, dynamic>> _readSoundSettings(
+    String username,
+  ) async {
     try {
       final dir = await _appDir();
       final file = File('${dir.path}/pillmate/appstatus.json');
@@ -203,16 +212,24 @@ class NortificationSetup {
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content);
           if (data is Map<String, dynamic>) {
+            final userSettings = _readUserTimeModeSettings(data, username);
             // ดึงชื่อไฟล์เสียงจาก time_mode_sound (ไม่มี extension)
-            String? soundPath = data['time_mode_sound']?.toString();
+            String? soundPath = userSettings['time_mode_sound']?.toString();
             String soundName = 'a01_clock_alarm_normal_30_sec';
             if (soundPath != null && soundPath.isNotEmpty) {
               soundName = _normalizeRawSoundName(soundPath);
             }
 
-            final repeatCount = data['time_mode_repeat_count'] as int? ?? 3;
+            final repeatCount =
+                int.tryParse(
+                  userSettings['time_mode_repeat_count']?.toString() ?? '',
+                ) ??
+                3;
             final snoozeDuration =
-                data['time_mode_snooze_duration'] as int? ?? 5;
+                int.tryParse(
+                  userSettings['time_mode_snooze_duration']?.toString() ?? '',
+                ) ??
+                5;
 
             return {
               'soundName': soundName,
@@ -232,6 +249,20 @@ class NortificationSetup {
     };
   }
 
+  static Map<String, dynamic> _readUserTimeModeSettings(
+    Map<String, dynamic> data,
+    String username,
+  ) {
+    final settingsByUser = data['time_mode_settings_by_user'];
+    if (settingsByUser is Map) {
+      final settings = settingsByUser[username];
+      if (settings is Map) {
+        return Map<String, dynamic>.from(settings);
+      }
+    }
+    return {};
+  }
+
   // ------------ ENTRY POINT (เรียกจาก Dashboard) ------------
 
   /// core: ล้าง noti เดิมทั้งหมด แล้วตั้ง noti ใหม่ให้ user นี้ล่วงหน้า (คำนวณ 5 ครั้งถัดไป)
@@ -247,6 +278,7 @@ class NortificationSetup {
     } catch (e) {
       debugPrint('NortificationSetup: cancelAll error $e');
     }
+    await _cancelNativeNotificationsIfNeeded();
 
     // 2) ล้างข้อมูล scheduled_notifications เดิมใน DB
     final dbHelper = DatabaseHelper();
@@ -258,7 +290,7 @@ class NortificationSetup {
     final settings = await _readSettings();
 
     // 4) อ่านเสียง + repeat settings จาก appstatus.json หรือ DB
-    final soundSettings = await _readSoundSettings();
+    final soundSettings = await _readSoundSettings(username);
     final soundName = (soundSettings['soundName'] as String?) ?? 'alarm';
     final int repeatCount = (soundSettings['repeatCount'] as int?) ?? 3;
     final int snoozeDuration = (soundSettings['snoozeDuration'] as int?) ?? 5;
@@ -394,8 +426,8 @@ class NortificationSetup {
         if (takenKeys.contains(key)) continue; // ข้ามถ้ากินแล้ว
 
         // หน้าต่างการแจ้งเตือน:
-        // - โหมดมื้ออาหาร: ห้ามแจ้งก่อน doseTime (เริ่มที่ doseTime)
-        // - โหมดเวลา (interval): เหมือนเดิม (dose - advance .. dose + after)
+        // - โหมดมื้ออาหาร: ใช้ logic ของมื้ออาหารแยกต่างหาก
+        // - โหมดเวลา (interval): แจ้งตรง doseTime เป็นครั้งที่ 1 แล้วค่อยย้ำตาม setting
         DateTime windowStart;
         final DateTime windowEnd;
         if (notifyMode == 'meal' && mealDoseInfos != null) {
@@ -417,13 +449,17 @@ class NortificationSetup {
             '🍽️ Meal window for reminder $reminderId dose $doseIso: start=$windowStart end=$windowEnd mealInfo=${mealInfo != null ? mealInfo['mealLabel'] : 'unknown'}',
           );
         } else {
-          windowStart = doseTime.subtract(Duration(minutes: settings.advance));
-          windowEnd = doseTime.add(Duration(minutes: settings.after));
+          final int gapMinutes = snoozeDuration > 0 ? snoozeDuration : 5;
+          final int totalAlerts = repeatCount > 0 ? repeatCount : 1;
+          windowStart = doseTime;
+          windowEnd = doseTime.add(
+            Duration(minutes: gapMinutes * (totalAlerts - 1)),
+          );
         }
 
         // เริ่มแจ้งจากเวลาที่เหมาะสม (ห้าม schedule ตรง "now" เพื่อหลีกเลี่ยงการยิงทันที)
         var candidate = windowStart;
-        if (!candidate.isAfter(now)) {
+        if (candidate.isBefore(now)) {
           // เลื่อน candidate ไปยัง step ถัดไปที่มากกว่า now ตามค่า snoozeDuration
           final int snooze = (snoozeDuration > 0) ? snoozeDuration : 5;
           final diff = now.difference(windowStart).inMinutes;
@@ -895,6 +931,47 @@ class NortificationSetup {
     return s.hashCode & 0x7fffffff;
   }
 
+  static Future<void> _cancelNativeNotificationsIfNeeded() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      await _nativeNotifications.invokeMethod<bool>('cancelAll');
+      debugPrint('NortificationSetup: Native Android alarms cancelled');
+    } catch (e) {
+      debugPrint('NortificationSetup: Native cancelAll failed: $e');
+    }
+  }
+
+  static Future<bool> _scheduleNativeAndroidNotification({
+    required int id,
+    required DateTime when,
+    required String title,
+    required String body,
+    required String channelId,
+    required String channelName,
+    required String soundName,
+  }) async {
+    if (!Platform.isAndroid) return false;
+
+    try {
+      final result = await _nativeNotifications.invokeMethod<bool>('schedule', {
+        'id': id,
+        'epochMillis': when.millisecondsSinceEpoch,
+        'title': title,
+        'body': body,
+        'channelId': channelId,
+        'channelName': channelName,
+        'soundName': soundName,
+      });
+      return result == true;
+    } catch (e) {
+      debugPrint(
+        'NortificationSetup: Native Android schedule failed for $id: $e',
+      );
+      return false;
+    }
+  }
+
   static Future<void> _scheduleNotification({
     required int id,
     required DateTime when,
@@ -903,12 +980,31 @@ class NortificationSetup {
     required String soundName,
   }) async {
     final normalizedSoundName = _normalizeRawSoundName(soundName);
+    final channelId = _channelIdForSound(normalizedSoundName);
+    final channelName = 'Pillmate Alarm ($normalizedSoundName)';
+
+    final nativeScheduled = await _scheduleNativeAndroidNotification(
+      id: id,
+      when: when,
+      title: title,
+      body: body,
+      channelId: channelId,
+      channelName: channelName,
+      soundName: normalizedSoundName,
+    );
+
+    if (nativeScheduled) {
+      debugPrint(
+        'NortificationSetup: Native Android alarm scheduled $id at $when with channel $channelId and sound $normalizedSoundName',
+      );
+      return;
+    }
 
     // Android notification channels จำเสียงตอนสร้าง channel ครั้งแรก
     // จึงต้องแยก channel ตามไฟล์เสียง เพื่อให้เสียงเปลี่ยนตามที่ผู้ใช้เลือกจริง
     final androidDetails = AndroidNotificationDetails(
-      'pillmate_alarm_$normalizedSoundName',
-      'Pillmate Alarm',
+      channelId,
+      channelName,
       channelDescription: 'แจ้งเตือนเวลากินยาด้วยเสียง $normalizedSoundName',
       importance: Importance.max,
       priority: Priority.high,
@@ -936,22 +1032,55 @@ class NortificationSetup {
     final tzWhen = tz.TZDateTime.from(when, tz.local);
 
     try {
+      await _zonedScheduleWithFallback(
+        id: id,
+        title: title,
+        body: body,
+        when: tzWhen,
+        details: details,
+      );
+      debugPrint(
+        'NortificationSetup: Scheduled notification $id at $when with channel ${_channelIdForSound(normalizedSoundName)} and sound $normalizedSoundName',
+      );
+    } catch (e) {
+      debugPrint('NortificationSetup: Failed to schedule notification $id: $e');
+    }
+  }
+
+  static Future<void> _zonedScheduleWithFallback({
+    required int id,
+    required String title,
+    required String body,
+    required tz.TZDateTime when,
+    required NotificationDetails details,
+  }) async {
+    try {
       await _flnp.zonedSchedule(
         id,
         title,
         body,
-        tzWhen,
+        when,
         details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: null,
       );
+    } on PlatformException catch (e) {
       debugPrint(
-        'NortificationSetup: Scheduled notification $id at $when with sound $normalizedSoundName',
+        'NortificationSetup: exact alarm failed for $id (${e.code}), retrying inexactAllowWhileIdle',
       );
-    } catch (e) {
-      debugPrint('NortificationSetup: Failed to schedule notification $id: $e');
+      await _flnp.zonedSchedule(
+        id,
+        title,
+        body,
+        when,
+        details,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: null,
+      );
     }
   }
 }

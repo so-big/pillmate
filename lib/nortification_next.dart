@@ -110,7 +110,9 @@ class NortificationSetup {
     try {
       return await FlutterTimezone.getLocalTimezone();
     } catch (e) {
-      debugPrint('NortificationSetup: Failed to get timezone, falling back to Asia/Bangkok: $e');
+      debugPrint(
+        'NortificationSetup: Failed to get timezone, falling back to Asia/Bangkok: $e',
+      );
       return 'Asia/Bangkok';
     }
   }
@@ -130,9 +132,8 @@ class NortificationSetup {
         if (content.trim().isNotEmpty) {
           final map = jsonDecode(content);
           if (map is Map<String, dynamic>) {
-            final advance =
-                int.tryParse('${map['advanceMinutes'] ?? 30}') ?? 30;
-            final after = int.tryParse('${map['afterMinutes'] ?? 30}') ?? 30;
+            final advance = int.tryParse('${map['advanceMinutes'] ?? 0}') ?? 0;
+            final after = int.tryParse('${map['afterMinutes'] ?? 0}') ?? 0;
             final playDur =
                 int.tryParse('${map['playDurationMinutes'] ?? 1}') ?? 1;
             final gap = int.tryParse('${map['repeatGapMinutes'] ?? 5}') ?? 5;
@@ -148,8 +149,8 @@ class NortificationSetup {
     } catch (e) {
       debugPrint('NortificationSetup: read settings error $e');
     }
-    // default: ล่วงหน้า 30 นาที หลังถึงเวลา 30 นาที เล่น 1 นาที, เว้น 5 นาที
-    return (advance: 30, after: 30, playDuration: 1, gap: 5);
+    // default: time-mode notifications fire exactly at the card time.
+    return (advance: 0, after: 0, playDuration: 1, gap: 5);
   }
 
   // ------------ ENTRY POINT (เรียกจาก Dashboard) ------------
@@ -193,19 +194,15 @@ class NortificationSetup {
           continue;
         }
 
-        // หน้าต่างการแจ้งเตือน: [dose - advance, dose + after]
-        final windowStart = doseTime.subtract(
-          Duration(minutes: settings.advance),
-        );
-        final windowEnd = doseTime.add(Duration(minutes: settings.after));
+        final gapMinutes = settings.gap <= 0 ? 5 : settings.gap;
+        final windowStart = doseTime;
+        final windowEnd = doseTime;
 
         // ถ้าหน้าต่างหมดอายุไปแล้วทั้งก้อน ก็ข้าม
         if (windowEnd.isBefore(now)) continue;
 
         // เริ่มแจ้งจาก max(now, windowStart)
         final firstNotify = windowStart.isAfter(now) ? windowStart : now;
-
-        final gapMinutes = settings.gap <= 0 ? 5 : settings.gap;
 
         var current = firstNotify;
         while (!current.isAfter(windowEnd)) {

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:path_provider/path_provider.dart';
@@ -43,6 +44,87 @@ String _normalizeRawSoundName(String value) {
   return _availableRawSounds.contains(fileName)
       ? fileName
       : 'a01_clock_alarm_normal_30_sec';
+}
+
+final List<Timer> _foregroundSoundTimers = [];
+final List<AudioPlayer> _foregroundAudioPlayers = [];
+
+void cancelForegroundAlertSounds() {
+  for (final timer in _foregroundSoundTimers) {
+    timer.cancel();
+  }
+  _foregroundSoundTimers.clear();
+
+  for (final player in _foregroundAudioPlayers) {
+    unawaited(player.stop());
+    unawaited(player.dispose());
+  }
+  _foregroundAudioPlayers.clear();
+}
+
+Future<bool> _isDoseAlreadyTaken(String doseKey) async {
+  final parts = doseKey.split('|');
+  if (parts.length < 2) return false;
+
+  final rows = await dbHelper.database.then(
+    (db) => db.query(
+      'taken_doses',
+      columns: ['reminder_id'],
+      where: 'reminder_id = ? AND dose_date_time = ?',
+      whereArgs: [parts.first, parts.sublist(1).join('|')],
+      limit: 1,
+    ),
+  );
+
+  return rows.isNotEmpty;
+}
+
+void _scheduleForegroundAlertSounds({
+  required UpcomingDose nextDose,
+  required String rawResourceName,
+  required int snoozeDuration,
+  required int repeatCount,
+}) {
+  cancelForegroundAlertSounds();
+
+  final totalAlerts = repeatCount > 0 ? repeatCount : 1;
+  final gapMinutes = snoozeDuration > 0 ? snoozeDuration : 5;
+
+  for (int i = 0; i < totalAlerts; i++) {
+    final scheduleTime = nextDose.doseTime.add(
+      Duration(minutes: i * gapMinutes),
+    );
+    final delay = scheduleTime.difference(tz.TZDateTime.now(tz.local));
+    if (delay.isNegative) continue;
+
+    _foregroundSoundTimers.add(
+      Timer(delay, () async {
+        final lifecycleState = WidgetsBinding.instance.lifecycleState;
+        if (lifecycleState != AppLifecycleState.resumed) return;
+        if (await _isDoseAlreadyTaken(nextDose.doseKey)) return;
+
+        final player = AudioPlayer();
+        _foregroundAudioPlayers.add(player);
+
+        try {
+          await player.setVolume(1.0);
+          await player.play(AssetSource('sound_norti/$rawResourceName.mp3'));
+          debugPrint(
+            '🔊 Foreground alert sound played: $rawResourceName for ${nextDose.doseKey}',
+          );
+
+          player.onPlayerComplete.listen((_) {
+            _foregroundAudioPlayers.remove(player);
+            unawaited(player.dispose());
+          });
+        } catch (e) {
+          debugPrint('❌ Foreground alert sound failed: $e');
+          _foregroundAudioPlayers.remove(player);
+          unawaited(player.dispose());
+        }
+      }),
+    );
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -93,7 +175,7 @@ Future<void> _configureLocalTimeZone() async {
 // HELPER: โหลด Settings จาก appstatus.json (สำหรับ Sound & Snooze)
 // -----------------------------------------------------------------------------
 
-Future<Map<String, dynamic>> _loadNotificationSettings() async {
+Future<Map<String, dynamic>> _loadNotificationSettings(String username) async {
   const String defaultRawSoundName = 'a01_clock_alarm_normal_30_sec';
   try {
     final dir = await getApplicationDocumentsDirectory();
@@ -102,12 +184,21 @@ Future<Map<String, dynamic>> _loadNotificationSettings() async {
     if (await file.exists()) {
       final content = await file.readAsString();
       final data = jsonDecode(content) as Map<String, dynamic>;
+      final userSettings = _readUserTimeModeSettings(data, username);
       final loadedSoundName = _normalizeRawSoundName(
-        data['time_mode_sound']?.toString() ?? defaultRawSoundName,
+        userSettings['time_mode_sound']?.toString() ?? defaultRawSoundName,
       );
       return {
-        'snoozeDuration': (data['time_mode_snooze_duration'] as int? ?? 2),
-        'repeatCount': (data['time_mode_repeat_count'] as int? ?? 1),
+        'snoozeDuration':
+            int.tryParse(
+              userSettings['time_mode_snooze_duration']?.toString() ?? '',
+            ) ??
+            5,
+        'repeatCount':
+            int.tryParse(
+              userSettings['time_mode_repeat_count']?.toString() ?? '',
+            ) ??
+            1,
         'rawResourceName': loadedSoundName,
       };
     }
@@ -115,10 +206,24 @@ Future<Map<String, dynamic>> _loadNotificationSettings() async {
     debugPrint('Error loading settings: $e');
   }
   return {
-    'snoozeDuration': 2,
+    'snoozeDuration': 5,
     'repeatCount': 1,
     'rawResourceName': defaultRawSoundName,
   };
+}
+
+Map<String, dynamic> _readUserTimeModeSettings(
+  Map<String, dynamic> data,
+  String username,
+) {
+  final settingsByUser = data['time_mode_settings_by_user'];
+  if (settingsByUser is Map) {
+    final settings = settingsByUser[username];
+    if (settings is Map) {
+      return Map<String, dynamic>.from(settings);
+    }
+  }
+  return {};
 }
 
 // -----------------------------------------------------------------------------
@@ -162,7 +267,7 @@ Future<UpcomingDose?> _getUpcomingDose(String username) async {
     return '${row['reminder_id']?.toString()}|${row['dose_date_time']?.toString()}';
   }).toSet();
 
-  UpcomingDose? nextDose = null;
+  UpcomingDose? nextDose;
 
   for (final reminder in reminders) {
     final reminderId = reminder['id']?.toString();
@@ -189,9 +294,13 @@ Future<UpcomingDose?> _getUpcomingDose(String username) async {
 
     if (start == null) continue;
 
-    final intervalMinutes =
-        (reminder['interval_minutes'] as int? ?? 0) +
-        ((reminder['interval_hours'] as int? ?? 0) * 60);
+    int intervalMinutes =
+        int.tryParse(reminder['interval_minutes']?.toString() ?? '') ?? 0;
+    if (intervalMinutes <= 0) {
+      final intervalHours =
+          int.tryParse(reminder['interval_hours']?.toString() ?? '') ?? 0;
+      intervalMinutes = intervalHours * 60;
+    }
 
     // ------------------------------------------------
     // Logic ค้นหาเวลากินยาถัดไปสำหรับ Reminder นี้
@@ -270,16 +379,12 @@ Future<UpcomingDose?> _getUpcomingDose(String username) async {
 
 // 3. ฟังก์ชันหลักสำหรับตั้งแจ้งเตือน (รับ username เข้ามา)
 void scheduleNotificationForNewAlert(String username) async {
-  // ✅ ประกาศตัวแปร now ภายในฟังก์ชัน
-  final now = tz.TZDateTime.now(tz.local);
-
   debugPrint('\n=============================================================');
-  debugPrint('🔔🔔🔔 NOTIFICATION SERVICE: START SCHEDULING 🔔🔔🔔');
+  debugPrint('🔔🔔🔔 FOREGROUND ALERT SERVICE: START 🔔🔔🔔');
   debugPrint('Master User: $username');
 
-  // ⚠️ ยกเลิกการแจ้งเตือนเก่าทั้งหมดก่อน (Reset)
-  await flutterLocalNotificationsPlugin.cancelAll();
-  debugPrint('✅ Cancelled all previous notifications.');
+  cancelForegroundAlertSounds();
+  debugPrint('✅ Cancelled previous foreground alert timers.');
 
   // ค้นหาโดสถัดไปที่ต้องกินจริง ๆ
   final nextDose = await _getUpcomingDose(username);
@@ -298,100 +403,23 @@ void scheduleNotificationForNewAlert(String username) async {
   final targetTime = nextDose.doseTime;
 
   // โหลด Settings สำหรับ Custom Sound, Snooze
-  final settings = await _loadNotificationSettings();
+  final settings = await _loadNotificationSettings(username);
   final int snoozeDuration = settings['snoozeDuration'] as int;
   final int repeatCount = settings['repeatCount'] as int;
   final String rawResourceName = settings['rawResourceName'] as String;
 
+  _scheduleForegroundAlertSounds(
+    nextDose: nextDose,
+    rawResourceName: rawResourceName,
+    snoozeDuration: snoozeDuration,
+    repeatCount: repeatCount,
+  );
+
   debugPrint('Upcoming Dose found at: $targetTime');
   debugPrint('Medicine: ${reminder['medicine_name']}');
 
-  // ------------------------------------------------
-  // สร้าง Notification Content
-  // ------------------------------------------------
-
   final medicineName = reminder['medicine_name']?.toString() ?? 'ยา';
-  final profileName = reminder['profile_name']?.toString() ?? 'คุณ';
-
-  String mealInstruction;
-  final beforeMeal = reminder['medicine_before_meal'] == 1;
-  final afterMeal = reminder['medicine_after_meal'] == 1;
-
-  if (beforeMeal && !afterMeal) {
-    mealInstruction = 'ก่อนอาหาร';
-  } else if (afterMeal && !beforeMeal) {
-    mealInstruction = 'หลังอาหาร';
-  } else if (beforeMeal && afterMeal) {
-    mealInstruction = 'ก่อนหรือหลังอาหารก็ได้';
-  } else {
-    mealInstruction = 'โดยไม่ระบุเวลาที่สัมพันธ์กับมื้ออาหาร';
-  }
-
-  // Title: ชื่อยา (medicine_name)
-  final String title = medicineName;
-
-  // Body: ได้เวลากินยา [medicine_name] ของ [profile_name] แล้วค่ะ กรุณาทานยา [ก่อนอาหาร/หลังอาหาร]
-  final String body =
-      'ได้เวลากินยา $medicineName ของ $profileName แล้วค่ะ กรุณาทานยา $mealInstruction';
-
-  // ------------------------------------------------
-  // ตั้งเวลาแจ้งเตือน (รวม Snooze)
-  // ------------------------------------------------
-
-  for (int i = 0; i <= repeatCount; i++) {
-    final tz.TZDateTime currentScheduleTime = targetTime.add(
-      Duration(minutes: i * snoozeDuration),
-    );
-
-    // ตรวจสอบอีกครั้งว่าเวลาที่จะ schedule ไม่เลยเวลาปัจจุบันไปแล้ว (เผื่อ Loop)
-    if (currentScheduleTime.isBefore(now)) {
-      continue;
-    }
-
-    final int notificationId =
-        (currentScheduleTime.millisecondsSinceEpoch ~/ 1000) & 0x7FFFFFFF;
-
-    final NotificationDetails notificationDetails = NotificationDetails(
-      android: AndroidNotificationDetails(
-        'pillmate_custom_sound_$rawResourceName',
-        'Pillmate Reminders',
-        channelDescription: 'แจ้งเตือนการทานยาด้วยเสียง $rawResourceName',
-        importance: Importance.max,
-        priority: Priority.high,
-        ticker: 'ticker',
-        playSound: true,
-        sound: RawResourceAndroidNotificationSound(rawResourceName),
-        audioAttributesUsage: AudioAttributesUsage.alarm,
-        category: AndroidNotificationCategory.alarm,
-      ),
-      iOS: DarwinNotificationDetails(
-        presentAlert: true,
-        presentSound: true,
-        presentBadge: true,
-        sound: '$rawResourceName.mp3',
-      ),
-    );
-
-    try {
-      await flutterLocalNotificationsPlugin.zonedSchedule(
-        notificationId,
-        title, // ชื่อยา
-        body, // รายละเอียด
-        currentScheduleTime,
-        notificationDetails,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: nextDose.doseKey, // เก็บ Dose Key ไว้ใน Payload
-      );
-
-      debugPrint(
-        '✅ Scheduled ID:$notificationId at $currentScheduleTime (Snooze $i)',
-      );
-    } catch (e) {
-      debugPrint('❌ Error scheduling notification: $e');
-    }
-  }
+  debugPrint('✅ Foreground sound timers set with sound=$rawResourceName');
   debugPrint('=============================================================\n');
 
   // 🔔 ส่งข้อความสถานะกลับไปที่ UI: ตั้งค่าสำเร็จ

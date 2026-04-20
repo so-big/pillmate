@@ -292,7 +292,8 @@ class _LeftMenuState extends State<LeftMenu> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const NortificationSettingPage(),
+                        builder: (_) =>
+                            NortificationSettingPage(username: widget.username),
                       ),
                     );
                   },

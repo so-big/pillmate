@@ -327,6 +327,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _handleLogout() async {
+    cancelForegroundAlertSounds();
     await AuthService.clearSession();
 
     try {

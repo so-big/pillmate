@@ -15,6 +15,7 @@ import 'manage_medicine.dart';
 import 'main.dart'; // สำหรับกลับไปหน้า LoginPage ตอน logout
 import 'view_dashboard.dart';
 import 'services/auth_service.dart';
+import 'notification_service.dart';
 
 class CarlendarPage extends StatefulWidget {
   final String username;
@@ -165,6 +166,7 @@ class _CarlendarPageState extends State<CarlendarPage> {
   }
 
   Future<void> _handleLogout() async {
+    cancelForegroundAlertSounds();
     await AuthService.clearSession();
 
     try {

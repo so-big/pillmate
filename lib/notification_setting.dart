@@ -9,7 +9,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 
 class NortificationSettingPage extends StatefulWidget {
-  const NortificationSettingPage({super.key});
+  final String username;
+
+  const NortificationSettingPage({super.key, required this.username});
 
   @override
   State<NortificationSettingPage> createState() =>
@@ -34,8 +36,8 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
 
   // --- ตัวแปรโหมดเวลา ---
   String? _timeModeSound;
-  // ✅ เปลี่ยน Default: 5 -> 2 นาที
-  int _timeModeSnoozeDuration = 2;
+  // Default gap between repeated time-mode notifications.
+  int _timeModeSnoozeDuration = 5;
   // ✅ เปลี่ยน Default: 3 -> 1 ครั้ง
   int _timeModeRepeatCount = 1;
 
@@ -99,10 +101,11 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         final content = await file.readAsString();
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content) as Map<String, dynamic>;
+          final userSettings = _readUserTimeModeSettings(data);
 
           // ⚠️ แก้ไข: เมื่อโหลดต้องใช้ List _availableSounds ในการตรวจสอบ (ซึ่งเก็บ path เต็ม)
           // หากค่าที่โหลดมาเป็นชื่อ Raw Resource Name (ไม่มี path) จะต้องแปลงกลับเป็น path เต็ม
-          String? loadedSound = data['time_mode_sound']?.toString();
+          String? loadedSound = userSettings['time_mode_sound']?.toString();
 
           if (loadedSound != null) {
             String fullPathMatch = _availableSounds.firstWhere(
@@ -125,14 +128,20 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             _timeModeSound = _availableSounds.first;
           }
 
-          if (data['time_mode_snooze_duration'] != null) {
+          if (userSettings['time_mode_snooze_duration'] != null) {
             final val =
-                int.tryParse(data['time_mode_snooze_duration'].toString()) ?? 2;
+                int.tryParse(
+                  userSettings['time_mode_snooze_duration'].toString(),
+                ) ??
+                5;
             _timeModeSnoozeDuration = val.clamp(2, 15);
           }
-          if (data['time_mode_repeat_count'] != null) {
+          if (userSettings['time_mode_repeat_count'] != null) {
             final val =
-                int.tryParse(data['time_mode_repeat_count'].toString()) ?? 1;
+                int.tryParse(
+                  userSettings['time_mode_repeat_count'].toString(),
+                ) ??
+                1;
             _timeModeRepeatCount = val.clamp(1, 3);
           }
         }
@@ -153,6 +162,17 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     return parts.join('.').toLowerCase(); // a01_..._30_sec
   }
 
+  Map<String, dynamic> _readUserTimeModeSettings(Map<String, dynamic> data) {
+    final settingsByUser = data['time_mode_settings_by_user'];
+    if (settingsByUser is Map) {
+      final settings = settingsByUser[widget.username];
+      if (settings is Map) {
+        return Map<String, dynamic>.from(settings);
+      }
+    }
+    return {};
+  }
+
   Future<void> _saveSettings() async {
     try {
       // ⚠️ ก่อนบันทึกให้หยุดเสียง Preview ก่อน
@@ -169,15 +189,26 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         }
       }
 
+      final settingsByUser = data['time_mode_settings_by_user'] is Map
+          ? Map<String, dynamic>.from(data['time_mode_settings_by_user'] as Map)
+          : <String, dynamic>{};
+
+      final userSettings = <String, dynamic>{};
+
       // ⭐️⭐️ NEW: บันทึกเฉพาะชื่อ Raw Resource Name ⭐️⭐️
       if (_timeModeSound != null) {
-        data['time_mode_sound'] = _extractRawResourceName(_timeModeSound!);
+        userSettings['time_mode_sound'] = _extractRawResourceName(
+          _timeModeSound!,
+        );
       } else {
-        data['time_mode_sound'] = null;
+        userSettings['time_mode_sound'] = null;
       }
 
-      data['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
-      data['time_mode_repeat_count'] = _timeModeRepeatCount;
+      userSettings['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
+      userSettings['time_mode_repeat_count'] = _timeModeRepeatCount;
+      userSettings['updated_at'] = DateTime.now().toIso8601String();
+      settingsByUser[widget.username] = userSettings;
+      data['time_mode_settings_by_user'] = settingsByUser;
 
       data.remove('meal_mode_sound');
       data.remove('meal_breakfast_time');
@@ -330,6 +361,35 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: Colors.teal,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.teal.shade50,
+              border: Border.all(color: Colors.teal.shade200),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.timer_outlined, color: Colors.teal, size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'ตั้งไว้ตอนนี้:',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '$_timeModeSnoozeDuration นาที',
+                  style: const TextStyle(
+                    color: Colors.teal,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 8),

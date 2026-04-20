@@ -7,7 +7,7 @@ class NotificationSettingsModel {
 
   const NotificationSettingsModel({
     this.soundName = 'a01_clock_alarm_normal_30_sec',
-    this.snoozeDurationMinutes = 2,
+    this.snoozeDurationMinutes = 5,
     this.repeatCount = 1,
     this.updatedAt = '',
   });
@@ -17,8 +17,7 @@ class NotificationSettingsModel {
     return NotificationSettingsModel(
       soundName: (map['time_mode_sound'] ?? 'a01_clock_alarm_normal_30_sec')
           .toString(),
-      snoozeDurationMinutes:
-          (map['time_mode_snooze_duration'] as int?) ?? 2,
+      snoozeDurationMinutes: (map['time_mode_snooze_duration'] as int?) ?? 5,
       repeatCount: (map['time_mode_repeat_count'] as int?) ?? 1,
       updatedAt: (map['updated_at'] ?? '').toString(),
     );
