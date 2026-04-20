@@ -29,6 +29,22 @@ final StreamController<String> uiMessageStream =
 
 final dbHelper = DatabaseHelper(); // ✅ เรียกใช้ Database Helper
 
+const Set<String> _availableRawSounds = {
+  'a01_clock_alarm_normal_30_sec',
+  'a02_clock_alarm_normal_1_min',
+  'a03_clock_alarm_normal_1_30_min',
+  'a04_clock_alarm_continue_30_sec',
+  'a05_clock_alarm_continue_1_min',
+  'a06_clock_alarm_continue_1_30_min',
+};
+
+String _normalizeRawSoundName(String value) {
+  final fileName = value.split('/').last.split('.').first.toLowerCase();
+  return _availableRawSounds.contains(fileName)
+      ? fileName
+      : 'a01_clock_alarm_normal_30_sec';
+}
+
 // -----------------------------------------------------------------------------
 // INIT & TIMEZONE (จากโค้ดเดิม)
 // -----------------------------------------------------------------------------
@@ -86,13 +102,9 @@ Future<Map<String, dynamic>> _loadNotificationSettings() async {
     if (await file.exists()) {
       final content = await file.readAsString();
       final data = jsonDecode(content) as Map<String, dynamic>;
-      String loadedSoundName =
-          data['time_mode_sound']?.toString().toLowerCase() ??
-          defaultRawSoundName;
-
-      if (loadedSoundName.contains('.') || loadedSoundName.contains('/')) {
-        loadedSoundName = defaultRawSoundName;
-      }
+      final loadedSoundName = _normalizeRawSoundName(
+        data['time_mode_sound']?.toString() ?? defaultRawSoundName,
+      );
       return {
         'snoozeDuration': (data['time_mode_snooze_duration'] as int? ?? 2),
         'repeatCount': (data['time_mode_repeat_count'] as int? ?? 1),
@@ -341,13 +353,22 @@ void scheduleNotificationForNewAlert(String username) async {
 
     final NotificationDetails notificationDetails = NotificationDetails(
       android: AndroidNotificationDetails(
-        'pillmate_custom_sound_v2',
+        'pillmate_custom_sound_$rawResourceName',
         'Pillmate Reminders',
-        channelDescription: 'แจ้งเตือนการทานยา',
+        channelDescription: 'แจ้งเตือนการทานยาด้วยเสียง $rawResourceName',
         importance: Importance.max,
         priority: Priority.high,
         ticker: 'ticker',
+        playSound: true,
         sound: RawResourceAndroidNotificationSound(rawResourceName),
+        audioAttributesUsage: AudioAttributesUsage.alarm,
+        category: AndroidNotificationCategory.alarm,
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentSound: true,
+        presentBadge: true,
+        sound: '$rawResourceName.mp3',
       ),
     );
 

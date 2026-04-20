@@ -43,6 +43,15 @@ class NortificationSetup {
   static final FlutterLocalNotificationsPlugin _flnp =
       FlutterLocalNotificationsPlugin();
 
+  static const Set<String> _availableRawSounds = {
+    'a01_clock_alarm_normal_30_sec',
+    'a02_clock_alarm_normal_1_min',
+    'a03_clock_alarm_normal_1_30_min',
+    'a04_clock_alarm_continue_30_sec',
+    'a05_clock_alarm_continue_1_min',
+    'a06_clock_alarm_continue_1_30_min',
+  };
+
   // ------------ FILE HELPERS ------------
 
   static Future<Directory> _appDir() async =>
@@ -53,6 +62,13 @@ class NortificationSetup {
 
   static Future<File> _setupFile() async =>
       File('${(await _appDir()).path}/pillmate/nortification_setup.json');
+
+  static String _normalizeRawSoundName(String value) {
+    final fileName = value.split('/').last.split('.').first.toLowerCase();
+    return _availableRawSounds.contains(fileName)
+        ? fileName
+        : 'a01_clock_alarm_normal_30_sec';
+  }
 
   // ------------ INIT PLUGIN ------------
 
@@ -90,11 +106,16 @@ class NortificationSetup {
             AndroidFlutterLocalNotificationsPlugin
           >();
       final granted = await androidImpl?.requestNotificationsPermission();
-      debugPrint('NortificationSetup: Notification permission granted: $granted');
-      
+      debugPrint(
+        'NortificationSetup: Notification permission granted: $granted',
+      );
+
       // ขอ permission สำหรับ exact alarm (Android 12+)
-      final exactAlarmPermission = await androidImpl?.requestExactAlarmsPermission();
-      debugPrint('NortificationSetup: Exact alarm permission granted: $exactAlarmPermission');
+      final exactAlarmPermission = await androidImpl
+          ?.requestExactAlarmsPermission();
+      debugPrint(
+        'NortificationSetup: Exact alarm permission granted: $exactAlarmPermission',
+      );
     } catch (e) {
       debugPrint('NortificationSetup: requestPermissions error $e');
     }
@@ -111,7 +132,9 @@ class NortificationSetup {
     try {
       return await FlutterTimezone.getLocalTimezone();
     } catch (e) {
-      debugPrint('NortificationSetup: Failed to get timezone, falling back to Asia/Bangkok: $e');
+      debugPrint(
+        'NortificationSetup: Failed to get timezone, falling back to Asia/Bangkok: $e',
+      );
       return 'Asia/Bangkok';
     }
   }
@@ -182,18 +205,14 @@ class NortificationSetup {
           if (data is Map<String, dynamic>) {
             // ดึงชื่อไฟล์เสียงจาก time_mode_sound (ไม่มี extension)
             String? soundPath = data['time_mode_sound']?.toString();
-            String soundName = 'alarm'; // default
+            String soundName = 'a01_clock_alarm_normal_30_sec';
             if (soundPath != null && soundPath.isNotEmpty) {
-              // Extract filename without extension
-              // e.g. "assets/sound_norti/a01_clock_alarm_normal_30_sec.mp3" -> "a01_clock_alarm_normal_30_sec"
-              final parts = soundPath.split('/').last.split('.');
-              if (parts.isNotEmpty) {
-                soundName = parts.first.toLowerCase(); // ensure lowercase
-              }
+              soundName = _normalizeRawSoundName(soundPath);
             }
 
             final repeatCount = data['time_mode_repeat_count'] as int? ?? 3;
-            final snoozeDuration = data['time_mode_snooze_duration'] as int? ?? 5;
+            final snoozeDuration =
+                data['time_mode_snooze_duration'] as int? ?? 5;
 
             return {
               'soundName': soundName,
@@ -207,7 +226,7 @@ class NortificationSetup {
       debugPrint('NortificationSetup: read sound settings error $e');
     }
     return {
-      'soundName': 'alarm',
+      'soundName': 'a01_clock_alarm_normal_30_sec',
       'repeatCount': 3,
       'snoozeDuration': 5,
     };
@@ -261,21 +280,35 @@ class NortificationSetup {
       final until = now.add(const Duration(days: 30));
 
       List<DateTime> allDoseTimes;
-      List<Map<String, dynamic>>? mealDoseInfos; // เก็บข้อมูลมื้ออาหารสำหรับสร้างข้อความ
+      List<Map<String, dynamic>>?
+      mealDoseInfos; // เก็บข้อมูลมื้ออาหารสำหรับสร้างข้อความ
       if (notifyMode == 'meal') {
         // โหมดมื้ออาหาร: ดึงเวลามื้อจากโปรไฟล์
         final profileName = r['profileName']?.toString() ?? username;
         if (!profileMealCache.containsKey(profileName)) {
-          profileMealCache[profileName] = await _readProfileMealTimes(profileName);
+          profileMealCache[profileName] = await _readProfileMealTimes(
+            profileName,
+          );
         }
         final mealSlots = profileMealCache[profileName] ?? [];
-        mealDoseInfos = _generateMealDoseTimesWithInfo(r, now, until, mealSlots);
-        allDoseTimes = mealDoseInfos.map((e) => e['doseTime'] as DateTime).toList();
-        debugPrint('NortificationSetup: Reminder $reminderId using MEAL mode with ${mealSlots.length} meal slots, generated ${allDoseTimes.length} doses');
+        mealDoseInfos = _generateMealDoseTimesWithInfo(
+          r,
+          now,
+          until,
+          mealSlots,
+        );
+        allDoseTimes = mealDoseInfos
+            .map((e) => e['doseTime'] as DateTime)
+            .toList();
+        debugPrint(
+          'NortificationSetup: Reminder $reminderId using MEAL mode with ${mealSlots.length} meal slots, generated ${allDoseTimes.length} doses',
+        );
       } else {
         // โหมดช่วงเวลา (interval)
         allDoseTimes = _generateDoseTimes(r, now, until);
-        debugPrint('NortificationSetup: Reminder $reminderId using INTERVAL mode, generated ${allDoseTimes.length} doses');
+        debugPrint(
+          'NortificationSetup: Reminder $reminderId using INTERVAL mode, generated ${allDoseTimes.length} doses',
+        );
       }
 
       // เก็บ notify timestamps ที่ตั้งไว้สำหรับ reminder นี้
@@ -286,11 +319,21 @@ class NortificationSetup {
         final medName = r['medicineName']?.toString() ?? 'ยา';
         final rawBeforeVal = r['medicine_before_meal'];
         final rawAfterVal = r['medicine_after_meal'];
-        final isBeforeMealExtra = (rawBeforeVal == true) || (rawBeforeVal?.toString() == '1') || (rawBeforeVal == 1);
-        final isAfterMealExtra = (rawAfterVal == true) || (rawAfterVal?.toString() == '1') || (rawAfterVal == 1);
+        final isBeforeMealExtra =
+            (rawBeforeVal == true) ||
+            (rawBeforeVal?.toString() == '1') ||
+            (rawBeforeVal == 1);
+        final isAfterMealExtra =
+            (rawAfterVal == true) ||
+            (rawAfterVal?.toString() == '1') ||
+            (rawAfterVal == 1);
         // ถ้าเป็นยาหลังอาหาร ให้แสดง 'หลัง' ไม่ใช่ 'ก่อน'
-        final mealTimingThExtra = isAfterMealExtra ? 'หลัง' : (isBeforeMealExtra ? 'ก่อน' : 'ก่อน');
-        debugPrint('🍽️ Meal-at notifications: rawBefore=$rawBeforeVal, rawAfter=$rawAfterVal -> isBeforeMeal=$isBeforeMealExtra, isAfterMeal=$isAfterMealExtra, timing=$mealTimingThExtra');
+        final mealTimingThExtra = isAfterMealExtra
+            ? 'หลัง'
+            : (isBeforeMealExtra ? 'ก่อน' : 'ก่อน');
+        debugPrint(
+          '🍽️ Meal-at notifications: rawBefore=$rawBeforeVal, rawAfter=$rawAfterVal -> isBeforeMeal=$isBeforeMealExtra, isAfterMeal=$isAfterMealExtra, timing=$mealTimingThExtra',
+        );
 
         for (final info in mealDoseInfos) {
           final mealTime = info['mealTime'] as DateTime;
@@ -302,9 +345,14 @@ class NortificationSetup {
 
           // ตั้งแจ้งเตือนตรงเวลามื้ออาหาร (ถ้ายังไม่ผ่าน)
           if (mealTime.isAfter(now)) {
-            final mealNotifyId = _stableId(username, reminderId, '${doseIso}|meal_at|${mealTime.toIso8601String()}');
+            final mealNotifyId = _stableId(
+              username,
+              reminderId,
+              '${doseIso}|meal_at|${mealTime.toIso8601String()}',
+            );
             final mealTitle = 'ได้เวลา$mealLabel';
-            final mealBody = 'ได้เวลาอาหารมื้อ$mealLabel แล้ว อย่าลืมกินยา $medName ${mealTimingThExtra}อาหารนะครับ';
+            final mealBody =
+                'ได้เวลาอาหารมื้อ$mealLabel แล้ว อย่าลืมกินยา $medName ${mealTimingThExtra}อาหารนะครับ';
 
             await _scheduleNotification(
               id: mealNotifyId,
@@ -324,7 +372,9 @@ class NortificationSetup {
               'canceled': 0,
             });
 
-            timestampsForReminder.add('(meal_at) ${mealTime.toIso8601String()}');
+            timestampsForReminder.add(
+              '(meal_at) ${mealTime.toIso8601String()}',
+            );
           }
         }
       }
@@ -359,10 +409,13 @@ class NortificationSetup {
             }
           }
 
-          windowStart = doseTime; // ห้ามเริ่มก่อน doseTime เพื่อไม่ให้แจ้งก่อนมื้อสำหรับยาหลังอาหาร
+          windowStart =
+              doseTime; // ห้ามเริ่มก่อน doseTime เพื่อไม่ให้แจ้งก่อนมื้อสำหรับยาหลังอาหาร
           windowEnd = doseTime.add(Duration(minutes: settings.after));
 
-          debugPrint('🍽️ Meal window for reminder $reminderId dose $doseIso: start=$windowStart end=$windowEnd mealInfo=${mealInfo != null ? mealInfo['mealLabel'] : 'unknown'}');
+          debugPrint(
+            '🍽️ Meal window for reminder $reminderId dose $doseIso: start=$windowStart end=$windowEnd mealInfo=${mealInfo != null ? mealInfo['mealLabel'] : 'unknown'}',
+          );
         } else {
           windowStart = doseTime.subtract(Duration(minutes: settings.advance));
           windowEnd = doseTime.add(Duration(minutes: settings.after));
@@ -388,16 +441,29 @@ class NortificationSetup {
           final notifyTime = candidate;
 
           // สร้าง id และอย่าให้ซ้ำ
-          final id = _stableId(username, reminderId, '$doseIso|${notifyTime.toIso8601String()}|$perDoseCounter');
+          final id = _stableId(
+            username,
+            reminderId,
+            '$doseIso|${notifyTime.toIso8601String()}|$perDoseCounter',
+          );
 
           // สร้างข้อความตามฟอร์แมตที่กำหนด
           final medName = r['medicineName']?.toString() ?? 'ถึงเวลากินยา';
           final profileName = r['profileName']?.toString() ?? username;
-          final isBeforeMeal = ((r['medicine_before_meal'] == true) || (r['medicine_before_meal']?.toString() == '1') || (r['medicine_before_meal'] == 1));
-          final isAfterMealFlag = ((r['medicine_after_meal'] == true) || (r['medicine_after_meal']?.toString() == '1') || (r['medicine_after_meal'] == 1));
-          final mealTimingTh = isBeforeMeal ? 'ก่อน' : (isAfterMealFlag ? 'หลัง' : '');
+          final isBeforeMeal =
+              ((r['medicine_before_meal'] == true) ||
+              (r['medicine_before_meal']?.toString() == '1') ||
+              (r['medicine_before_meal'] == 1));
+          final isAfterMealFlag =
+              ((r['medicine_after_meal'] == true) ||
+              (r['medicine_after_meal']?.toString() == '1') ||
+              (r['medicine_after_meal'] == 1));
+          final mealTimingTh = isBeforeMeal
+              ? 'ก่อน'
+              : (isAfterMealFlag ? 'หลัง' : '');
           final scheduledTimeStr = DateTime.parse(doseIso).toLocal();
-          final scheduledTimeFormatted = '${scheduledTimeStr.hour.toString().padLeft(2, '0')}:${scheduledTimeStr.minute.toString().padLeft(2, '0')}';
+          final scheduledTimeFormatted =
+              '${scheduledTimeStr.hour.toString().padLeft(2, '0')}:${scheduledTimeStr.minute.toString().padLeft(2, '0')}';
           final currentCount = perDoseCounter + 1;
 
           String title;
@@ -422,17 +488,22 @@ class NortificationSetup {
             if (mealTime != null && notifyTime.isAtSameMomentAs(mealTime)) {
               // ข้อความ ณ เวลาอาหาร
               title = 'ได้เวลา$mealLabel';
-              body = 'ได้เวลาอาหารมื้อ$mealLabel แล้ว อย่าลืมกินยา $medName ${mealTimingTh}อาหารนะครับ';
+              body =
+                  'ได้เวลาอาหารมื้อ$mealLabel แล้ว อย่าลืมกินยา $medName ${mealTimingTh}อาหารนะครับ';
             } else {
               // ข้อความแจ้งเตือนยาตามมื้อ (ก่อน/หลัง 15 นาที)
               title = 'เตือนกินยา ($profileName)';
-              body = 'ได้เวลากินยา $medName ${mealTimingTh}อาหารมื้อ$mealLabel ของ $profileName (ครั้งที่ $currentCount/$repeatCount เวลา $scheduledTimeFormatted)';
+              body =
+                  'ได้เวลากินยา $medName ${mealTimingTh}อาหารมื้อ$mealLabel ของ $profileName (ครั้งที่ $currentCount/$repeatCount เวลา $scheduledTimeFormatted)';
             }
           } else {
             // โหมด interval: ข้อความเดิม
-            final mealTiming = isBeforeMeal ? 'ก่อนอาหาร' : (isAfterMealFlag ? 'หลังอาหาร' : '');
+            final mealTiming = isBeforeMeal
+                ? 'ก่อนอาหาร'
+                : (isAfterMealFlag ? 'หลังอาหาร' : '');
             title = 'เตือนกินยา ($profileName)';
-            body = 'ได้เวลากินยา $medName ($mealTiming) ของ $profileName ครั้งที่ $currentCount/$repeatCount เวลา $scheduledTimeFormatted';
+            body =
+                'ได้เวลากินยา $medName ($mealTiming) ของ $profileName ครั้งที่ $currentCount/$repeatCount เวลา $scheduledTimeFormatted';
           }
 
           await _scheduleNotification(
@@ -465,21 +536,31 @@ class NortificationSetup {
           candidate = candidate.add(Duration(minutes: snoozeDuration));
 
           // เช็คเงื่อนไขทั้งสอง — ถ้าทั้งสองเป็นจริงแล้ว ให้หยุดการสร้าง alert เพิ่มเติมสำหรับ reminder นี้
-          final durationSpan = lastScheduledForThisReminder!.difference(firstScheduledForThisReminder!);
-          if (totalAlertsForThisReminder >= thresholdCount && durationSpan >= thresholdDuration) {
+          final durationSpan = lastScheduledForThisReminder!.difference(
+            firstScheduledForThisReminder!,
+          );
+          if (totalAlertsForThisReminder >= thresholdCount &&
+              durationSpan >= thresholdDuration) {
             break;
           }
         }
 
         // ถ้าบรรลุเงื่อนไขแล้ว ก็หยุดลูป doses ของ reminder นี้
-        if (totalAlertsForThisReminder >= thresholdCount && lastScheduledForThisReminder != null && lastScheduledForThisReminder.difference(firstScheduledForThisReminder ?? lastScheduledForThisReminder) >= thresholdDuration) {
+        if (totalAlertsForThisReminder >= thresholdCount &&
+            lastScheduledForThisReminder != null &&
+            lastScheduledForThisReminder.difference(
+                  firstScheduledForThisReminder ?? lastScheduledForThisReminder,
+                ) >=
+                thresholdDuration) {
           break;
         }
       }
 
       // Log รายการ timestamps ที่คำนวณได้สำหรับ reminder นี้
       if (timestampsForReminder.isNotEmpty) {
-        debugPrint('NortificationSetup: Reminder $reminderId scheduled timestamps:');
+        debugPrint(
+          'NortificationSetup: Reminder $reminderId scheduled timestamps:',
+        );
         for (final t in timestampsForReminder) {
           debugPrint('  - $t');
         }
@@ -496,10 +577,14 @@ class NortificationSetup {
       final Map<String, List<String>> grouped = {};
       for (final rec in scheduledForUser) {
         final rid = rec['reminder_id']?.toString() ?? 'unknown';
-        grouped.putIfAbsent(rid, () => []).add(rec['notify_at']?.toString() ?? '');
+        grouped
+            .putIfAbsent(rid, () => [])
+            .add(rec['notify_at']?.toString() ?? '');
       }
 
-      debugPrint('NortificationSetup: Scheduled ${scheduledForUser.length} notifications for $username');
+      debugPrint(
+        'NortificationSetup: Scheduled ${scheduledForUser.length} notifications for $username',
+      );
       debugPrint('NortificationSetup: Detailed schedule:');
       for (final entry in grouped.entries) {
         debugPrint('Reminder ${entry.key}:');
@@ -508,7 +593,9 @@ class NortificationSetup {
         }
       }
     } else {
-      debugPrint('NortificationSetup: No notifications scheduled for $username');
+      debugPrint(
+        'NortificationSetup: No notifications scheduled for $username',
+      );
     }
   }
 
@@ -523,7 +610,9 @@ class NortificationSetup {
       final rows = await dbHelper.getCalendarAlerts(username);
       // Map snake_case columns to camelCase keys used by _generateDoseTimes
       return rows.map<Map<String, dynamic>>((row) {
-        debugPrint('🔍 _readRemindersFor: id=${row['id']}, medicine_before_meal=${row['medicine_before_meal']} (${row['medicine_before_meal'].runtimeType}), medicine_after_meal=${row['medicine_after_meal']} (${row['medicine_after_meal'].runtimeType}), notify_mode=${row['notify_mode']}');
+        debugPrint(
+          '🔍 _readRemindersFor: id=${row['id']}, medicine_before_meal=${row['medicine_before_meal']} (${row['medicine_before_meal'].runtimeType}), medicine_after_meal=${row['medicine_after_meal']} (${row['medicine_after_meal'].runtimeType}), notify_mode=${row['notify_mode']}',
+        );
         return {
           'id': row['id'],
           'medicineName': row['medicine_name'] ?? '',
@@ -584,10 +673,30 @@ class NortificationSetup {
 
       final meals = <Map<String, dynamic>>[];
       final slots = [
-        {'key': 'breakfast', 'notifyKey': 'breakfast_notify', 'label': 'อาหารเช้า', 'default': '06:00'},
-        {'key': 'lunch', 'notifyKey': 'lunch_notify', 'label': 'อาหารกลางวัน', 'default': '12:00'},
-        {'key': 'dinner', 'notifyKey': 'dinner_notify', 'label': 'อาหารเย็น', 'default': '18:00'},
-        {'key': 'bedtime', 'notifyKey': 'bedtime_notify', 'label': 'ก่อนนอน', 'default': '21:00'},
+        {
+          'key': 'breakfast',
+          'notifyKey': 'breakfast_notify',
+          'label': 'อาหารเช้า',
+          'default': '06:00',
+        },
+        {
+          'key': 'lunch',
+          'notifyKey': 'lunch_notify',
+          'label': 'อาหารกลางวัน',
+          'default': '12:00',
+        },
+        {
+          'key': 'dinner',
+          'notifyKey': 'dinner_notify',
+          'label': 'อาหารเย็น',
+          'default': '18:00',
+        },
+        {
+          'key': 'bedtime',
+          'notifyKey': 'bedtime_notify',
+          'label': 'ก่อนนอน',
+          'default': '21:00',
+        },
       ];
 
       for (final slot in slots) {
@@ -599,11 +708,7 @@ class NortificationSetup {
         final hour = int.tryParse(parts[0]) ?? 0;
         final minute = (parts.length > 1) ? (int.tryParse(parts[1]) ?? 0) : 0;
 
-        meals.add({
-          'label': slot['label'],
-          'hour': hour,
-          'minute': minute,
-        });
+        meals.add({'label': slot['label'], 'hour': hour, 'minute': minute});
       }
       return meals;
     } catch (e) {
@@ -640,30 +745,41 @@ class NortificationSetup {
     // ตรวจสอบว่าเป็นยาก่อนอาหารหรือหลังอาหาร
     final rawBefore = r['medicine_before_meal'];
     final rawAfter = r['medicine_after_meal'];
-    final isBeforeMeal = (rawBefore == 1) ||
+    final isBeforeMeal =
+        (rawBefore == 1) ||
         (rawBefore == true) ||
         (rawBefore?.toString() == '1');
-    final isAfterMeal = (rawAfter == 1) ||
-        (rawAfter == true) ||
-        (rawAfter?.toString() == '1');
+    final isAfterMeal =
+        (rawAfter == 1) || (rawAfter == true) || (rawAfter?.toString() == '1');
 
     // offset: ก่อนอาหาร = -15 นาที, หลังอาหาร = +15 นาที
     final int offsetMinutes = isBeforeMeal ? -15 : (isAfterMeal ? 15 : 0);
 
     debugPrint('🍽️ _generateMealDoseTimesWithInfo:');
-    debugPrint('   rawBefore=$rawBefore (type=${rawBefore.runtimeType}), rawAfter=$rawAfter (type=${rawAfter.runtimeType})');
+    debugPrint(
+      '   rawBefore=$rawBefore (type=${rawBefore.runtimeType}), rawAfter=$rawAfter (type=${rawAfter.runtimeType})',
+    );
     debugPrint('   isBeforeMeal=$isBeforeMeal, isAfterMeal=$isAfterMeal');
-    debugPrint('   offsetMinutes=$offsetMinutes (ยาก่อนอาหาร=-15, ยาหลังอาหาร=+15)');
+    debugPrint(
+      '   offsetMinutes=$offsetMinutes (ยาก่อนอาหาร=-15, ยาหลังอาหาร=+15)',
+    );
 
     // วนรอบแต่ละวันในช่วง, เพิ่ม dose ตามเวลามื้อที่เปิดใช้งาน
-    var currentDay = DateTime(rangeStart.year, rangeStart.month, rangeStart.day);
+    var currentDay = DateTime(
+      rangeStart.year,
+      rangeStart.month,
+      rangeStart.day,
+    );
     final lastDay = DateTime(rangeEnd.year, rangeEnd.month, rangeEnd.day);
 
     while (!currentDay.isAfter(lastDay)) {
       for (final meal in mealSlots) {
         final mealTime = DateTime(
-          currentDay.year, currentDay.month, currentDay.day,
-          meal['hour'] as int, meal['minute'] as int,
+          currentDay.year,
+          currentDay.month,
+          currentDay.day,
+          meal['hour'] as int,
+          meal['minute'] as int,
         );
 
         // เวลาแจ้งเตือนยา = เวลามื้ออาหาร ± 15 นาที
@@ -691,7 +807,12 @@ class NortificationSetup {
     DateTime until,
     List<Map<String, dynamic>> mealSlots,
   ) {
-    final infos = _generateMealDoseTimesWithInfo(r, startFrom, until, mealSlots);
+    final infos = _generateMealDoseTimesWithInfo(
+      r,
+      startFrom,
+      until,
+      mealSlots,
+    );
     return infos.map((e) => e['doseTime'] as DateTime).toList();
   }
 
@@ -781,25 +902,30 @@ class NortificationSetup {
     required String body,
     required String soundName,
   }) async {
-    // ใช้ channel ใหม่สำหรับเสียงที่เลือก
+    final normalizedSoundName = _normalizeRawSoundName(soundName);
+
+    // Android notification channels จำเสียงตอนสร้าง channel ครั้งแรก
+    // จึงต้องแยก channel ตามไฟล์เสียง เพื่อให้เสียงเปลี่ยนตามที่ผู้ใช้เลือกจริง
     final androidDetails = AndroidNotificationDetails(
-      'pillmate_alarm_channel',
+      'pillmate_alarm_$normalizedSoundName',
       'Pillmate Alarm',
-      channelDescription: 'แจ้งเตือนเวลากินยาพร้อมเสียงปลุก',
+      channelDescription: 'แจ้งเตือนเวลากินยาด้วยเสียง $normalizedSoundName',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
-      sound: RawResourceAndroidNotificationSound(soundName),
+      sound: RawResourceAndroidNotificationSound(normalizedSoundName),
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+      category: AndroidNotificationCategory.alarm,
       fullScreenIntent: true,
       enableVibration: true,
       enableLights: true,
     );
 
-    const iosDetails = DarwinNotificationDetails(
+    final iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentSound: true,
       presentBadge: true,
-      sound: 'alarm.mp3', // iOS ใช้ไฟล์เดียว (ถ้าต้องการหลายไฟล์ต้อง copy ไปที่ bundle)
+      sound: '$normalizedSoundName.mp3',
     );
 
     final details = NotificationDetails(
@@ -821,7 +947,9 @@ class NortificationSetup {
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: null,
       );
-      debugPrint('NortificationSetup: Scheduled notification $id at $when with sound $soundName');
+      debugPrint(
+        'NortificationSetup: Scheduled notification $id at $when with sound $normalizedSoundName',
+      );
     } catch (e) {
       debugPrint('NortificationSetup: Failed to schedule notification $id: $e');
     }
