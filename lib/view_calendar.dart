@@ -192,8 +192,8 @@ class _CarlendarPageState extends State<CarlendarPage> {
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.5,
-          minChildSize: 0.25,
+          initialChildSize: 0.92,
+          minChildSize: 0.5,
           maxChildSize: 1.0, // แก้ให้ลากได้สุดจอ
           expand: false,
           builder: (ctx, scrollController) {

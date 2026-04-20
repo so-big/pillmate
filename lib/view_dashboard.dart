@@ -354,8 +354,8 @@ class _DashboardPageState extends State<DashboardPage> {
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.5,
-          minChildSize: 0.25,
+          initialChildSize: 0.92,
+          minChildSize: 0.5,
           maxChildSize: 1.0,
           expand: true,
           builder: (ctx, scrollController) {
@@ -386,8 +386,8 @@ class _DashboardPageState extends State<DashboardPage> {
           Colors.transparent, // โปร่งใสเพื่อให้เห็นมุมโค้งของ Sheet
       builder: (ctx) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.5,
-          minChildSize: 0.25,
+          initialChildSize: 0.92,
+          minChildSize: 0.5,
           maxChildSize: 1.0,
           expand: true,
           builder: (ctx, scrollController) {
