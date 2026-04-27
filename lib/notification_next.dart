@@ -202,8 +202,9 @@ class NortificationSetup {
 
   /// อ่านตั้งค่าเสียง + repeat count จาก appstatus.json
   static Future<Map<String, dynamic>> _readSoundSettings(
-    String username,
-  ) async {
+    String username, {
+    required String mode,
+  }) async {
     try {
       final dir = await _appDir();
       final file = File('${dir.path}/pillmate/appstatus.json');
@@ -212,23 +213,28 @@ class NortificationSetup {
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content);
           if (data is Map<String, dynamic>) {
-            final userSettings = _readUserTimeModeSettings(data, username);
-            // ดึงชื่อไฟล์เสียงจาก time_mode_sound (ไม่มี extension)
-            String? soundPath = userSettings['time_mode_sound']?.toString();
+            final isMealMode = mode == 'meal';
+            final userSettings = isMealMode
+                ? _readUserMealModeSettings(data, username)
+                : _readUserTimeModeSettings(data, username);
+            final soundKey = isMealMode ? 'meal_mode_sound' : 'time_mode_sound';
+            final repeatKey = isMealMode
+                ? 'meal_mode_repeat_count'
+                : 'time_mode_repeat_count';
+            final snoozeKey = isMealMode
+                ? 'meal_mode_snooze_duration'
+                : 'time_mode_snooze_duration';
+            // ดึงชื่อไฟล์เสียงจาก setting (ไม่มี extension)
+            String? soundPath = userSettings[soundKey]?.toString();
             String soundName = 'a01_clock_alarm_normal_30_sec';
             if (soundPath != null && soundPath.isNotEmpty) {
               soundName = _normalizeRawSoundName(soundPath);
             }
 
             final repeatCount =
-                int.tryParse(
-                  userSettings['time_mode_repeat_count']?.toString() ?? '',
-                ) ??
-                3;
+                int.tryParse(userSettings[repeatKey]?.toString() ?? '') ?? 1;
             final snoozeDuration =
-                int.tryParse(
-                  userSettings['time_mode_snooze_duration']?.toString() ?? '',
-                ) ??
+                int.tryParse(userSettings[snoozeKey]?.toString() ?? '') ??
                 5;
 
             return {
@@ -244,7 +250,7 @@ class NortificationSetup {
     }
     return {
       'soundName': 'a01_clock_alarm_normal_30_sec',
-      'repeatCount': 3,
+      'repeatCount': 1,
       'snoozeDuration': 5,
     };
   }
@@ -254,6 +260,20 @@ class NortificationSetup {
     String username,
   ) {
     final settingsByUser = data['time_mode_settings_by_user'];
+    if (settingsByUser is Map) {
+      final settings = settingsByUser[username];
+      if (settings is Map) {
+        return Map<String, dynamic>.from(settings);
+      }
+    }
+    return {};
+  }
+
+  static Map<String, dynamic> _readUserMealModeSettings(
+    Map<String, dynamic> data,
+    String username,
+  ) {
+    final settingsByUser = data['meal_mode_settings_by_user'];
     if (settingsByUser is Map) {
       final settings = settingsByUser[username];
       if (settings is Map) {
@@ -290,10 +310,14 @@ class NortificationSetup {
     final settings = await _readSettings();
 
     // 4) อ่านเสียง + repeat settings จาก appstatus.json หรือ DB
-    final soundSettings = await _readSoundSettings(username);
-    final soundName = (soundSettings['soundName'] as String?) ?? 'alarm';
-    final int repeatCount = (soundSettings['repeatCount'] as int?) ?? 3;
-    final int snoozeDuration = (soundSettings['snoozeDuration'] as int?) ?? 5;
+    final timeSoundSettings = await _readSoundSettings(
+      username,
+      mode: 'time',
+    );
+    final mealSoundSettings = await _readSoundSettings(
+      username,
+      mode: 'meal',
+    );
 
     final now = DateTime.now();
     final scheduledForUser = <Map<String, dynamic>>[];
@@ -307,6 +331,15 @@ class NortificationSetup {
 
       // ตรวจสอบ notify_mode: 'interval' หรือ 'meal'
       final String notifyMode = r['notifyMode']?.toString() ?? 'interval';
+      final activeSoundSettings = notifyMode == 'meal'
+          ? mealSoundSettings
+          : timeSoundSettings;
+      final soundName =
+          (activeSoundSettings['soundName'] as String?) ?? 'alarm';
+      final int repeatCount =
+          (activeSoundSettings['repeatCount'] as int?) ?? 1;
+      final int snoozeDuration =
+          (activeSoundSettings['snoozeDuration'] as int?) ?? 5;
 
       // คำนวณเวลากินยาทั้งหมด เริ่มจาก now และขยายไปจนกว่าจะครบเงื่อนไขหรือถึง limit (30 วัน)
       final until = now.add(const Duration(days: 30));

@@ -41,12 +41,18 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   // ✅ เปลี่ยน Default: 3 -> 1 ครั้ง
   int _timeModeRepeatCount = 1;
 
+  // --- ตัวแปรโหมดมื้ออาหาร ---
+  String? _mealModeSound;
+  int _mealModeSnoozeDuration = 5;
+  int _mealModeRepeatCount = 1;
+
   @override
   void initState() {
     super.initState();
     // ตั้งค่าเริ่มต้น
     if (_availableSounds.isNotEmpty) {
       _timeModeSound = _availableSounds.first;
+      _mealModeSound = _availableSounds.first;
     }
     _initData();
   }
@@ -101,48 +107,59 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         final content = await file.readAsString();
         if (content.trim().isNotEmpty) {
           final data = jsonDecode(content) as Map<String, dynamic>;
-          final userSettings = _readUserTimeModeSettings(data);
+          final timeUserSettings = _readUserTimeModeSettings(data);
+          final mealUserSettings = _readUserMealModeSettings(data);
 
           // ⚠️ แก้ไข: เมื่อโหลดต้องใช้ List _availableSounds ในการตรวจสอบ (ซึ่งเก็บ path เต็ม)
           // หากค่าที่โหลดมาเป็นชื่อ Raw Resource Name (ไม่มี path) จะต้องแปลงกลับเป็น path เต็ม
-          String? loadedSound = userSettings['time_mode_sound']?.toString();
-
-          if (loadedSound != null) {
-            String fullPathMatch = _availableSounds.firstWhere(
-              // ลองหาจากชื่อ Raw Resource Name (ที่บันทึกใน JSON)
-              (path) => path.contains(loadedSound),
-              orElse: () => '',
-            );
-
-            if (fullPathMatch.isNotEmpty) {
-              _timeModeSound = fullPathMatch;
-            } else if (_availableSounds.contains(loadedSound)) {
-              // Fallback: ถ้าค่าที่โหลดมาเป็น Path เต็มอยู่แล้ว (อาจเป็นค่าเดิมก่อนแก้ไข)
-              _timeModeSound = loadedSound;
-            }
-          }
+          _timeModeSound = _resolveSoundPath(
+            timeUserSettings['time_mode_sound']?.toString(),
+          );
+          _mealModeSound = _resolveSoundPath(
+            mealUserSettings['meal_mode_sound']?.toString(),
+          );
 
           // ตรวจสอบความถูกต้องของค่าที่โหลด
           if (_timeModeSound == null ||
               !_availableSounds.contains(_timeModeSound)) {
             _timeModeSound = _availableSounds.first;
           }
+          if (_mealModeSound == null ||
+              !_availableSounds.contains(_mealModeSound)) {
+            _mealModeSound = _availableSounds.first;
+          }
 
-          if (userSettings['time_mode_snooze_duration'] != null) {
+          if (timeUserSettings['time_mode_snooze_duration'] != null) {
             final val =
                 int.tryParse(
-                  userSettings['time_mode_snooze_duration'].toString(),
+                  timeUserSettings['time_mode_snooze_duration'].toString(),
                 ) ??
                 5;
             _timeModeSnoozeDuration = val.clamp(2, 15);
           }
-          if (userSettings['time_mode_repeat_count'] != null) {
+          if (timeUserSettings['time_mode_repeat_count'] != null) {
             final val =
                 int.tryParse(
-                  userSettings['time_mode_repeat_count'].toString(),
+                  timeUserSettings['time_mode_repeat_count'].toString(),
                 ) ??
                 1;
             _timeModeRepeatCount = val.clamp(1, 3);
+          }
+          if (mealUserSettings['meal_mode_snooze_duration'] != null) {
+            final val =
+                int.tryParse(
+                  mealUserSettings['meal_mode_snooze_duration'].toString(),
+                ) ??
+                5;
+            _mealModeSnoozeDuration = val.clamp(2, 15);
+          }
+          if (mealUserSettings['meal_mode_repeat_count'] != null) {
+            final val =
+                int.tryParse(
+                  mealUserSettings['meal_mode_repeat_count'].toString(),
+                ) ??
+                1;
+            _mealModeRepeatCount = val.clamp(1, 3);
           }
         }
       }
@@ -162,8 +179,33 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
     return parts.join('.').toLowerCase(); // a01_..._30_sec
   }
 
+  String? _resolveSoundPath(String? savedSound) {
+    if (savedSound == null || savedSound.isEmpty) return null;
+
+    final fullPathMatch = _availableSounds.firstWhere(
+      (path) => path.contains(savedSound),
+      orElse: () => '',
+    );
+    if (fullPathMatch.isNotEmpty) return fullPathMatch;
+
+    if (_availableSounds.contains(savedSound)) return savedSound;
+
+    return null;
+  }
+
   Map<String, dynamic> _readUserTimeModeSettings(Map<String, dynamic> data) {
     final settingsByUser = data['time_mode_settings_by_user'];
+    if (settingsByUser is Map) {
+      final settings = settingsByUser[widget.username];
+      if (settings is Map) {
+        return Map<String, dynamic>.from(settings);
+      }
+    }
+    return {};
+  }
+
+  Map<String, dynamic> _readUserMealModeSettings(Map<String, dynamic> data) {
+    final settingsByUser = data['meal_mode_settings_by_user'];
     if (settingsByUser is Map) {
       final settings = settingsByUser[widget.username];
       if (settings is Map) {
@@ -189,33 +231,52 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
         }
       }
 
-      final settingsByUser = data['time_mode_settings_by_user'] is Map
+      final timeSettingsByUser = data['time_mode_settings_by_user'] is Map
           ? Map<String, dynamic>.from(data['time_mode_settings_by_user'] as Map)
           : <String, dynamic>{};
+      final mealSettingsByUser = data['meal_mode_settings_by_user'] is Map
+          ? Map<String, dynamic>.from(data['meal_mode_settings_by_user'] as Map)
+          : <String, dynamic>{};
 
-      final userSettings = <String, dynamic>{};
+      final timeUserSettings = <String, dynamic>{};
+      final mealUserSettings = <String, dynamic>{};
 
       // ⭐️⭐️ NEW: บันทึกเฉพาะชื่อ Raw Resource Name ⭐️⭐️
       if (_timeModeSound != null) {
-        userSettings['time_mode_sound'] = _extractRawResourceName(
+        timeUserSettings['time_mode_sound'] = _extractRawResourceName(
           _timeModeSound!,
         );
       } else {
-        userSettings['time_mode_sound'] = null;
+        timeUserSettings['time_mode_sound'] = null;
+      }
+      if (_mealModeSound != null) {
+        mealUserSettings['meal_mode_sound'] = _extractRawResourceName(
+          _mealModeSound!,
+        );
+      } else {
+        mealUserSettings['meal_mode_sound'] = null;
       }
 
-      userSettings['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
-      userSettings['time_mode_repeat_count'] = _timeModeRepeatCount;
-      userSettings['updated_at'] = DateTime.now().toIso8601String();
-      settingsByUser[widget.username] = userSettings;
-      data['time_mode_settings_by_user'] = settingsByUser;
+      final nowIso = DateTime.now().toIso8601String();
+
+      timeUserSettings['time_mode_snooze_duration'] = _timeModeSnoozeDuration;
+      timeUserSettings['time_mode_repeat_count'] = _timeModeRepeatCount;
+      timeUserSettings['updated_at'] = nowIso;
+      timeSettingsByUser[widget.username] = timeUserSettings;
+      data['time_mode_settings_by_user'] = timeSettingsByUser;
+
+      mealUserSettings['meal_mode_snooze_duration'] = _mealModeSnoozeDuration;
+      mealUserSettings['meal_mode_repeat_count'] = _mealModeRepeatCount;
+      mealUserSettings['updated_at'] = nowIso;
+      mealSettingsByUser[widget.username] = mealUserSettings;
+      data['meal_mode_settings_by_user'] = mealSettingsByUser;
 
       data.remove('meal_mode_sound');
       data.remove('meal_breakfast_time');
       data.remove('meal_lunch_time');
       data.remove('meal_dinner_time');
 
-      data['updated_at'] = DateTime.now().toIso8601String();
+      data['updated_at'] = nowIso;
 
       await file.writeAsString(jsonEncode(data));
 
@@ -317,39 +378,109 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('ตั้งค่าการแจ้งเตือนตามเวลา'),
-        backgroundColor: Colors.teal,
-        actions: const [],
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('ตั้งค่าการแจ้งเตือน'),
+          backgroundColor: Colors.teal,
+          actions: const [],
+          bottom: const TabBar(
+            indicatorColor: Colors.white,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            tabs: [
+              Tab(text: 'แจ้งเตือนตามเวลา'),
+              Tab(text: 'แจ้งเตือนตามมื้ออาหาร'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _buildTimeModeView(),
+            _buildMealModeView(),
+          ],
+        ),
       ),
-      body: _buildTimeModeView(),
+    );
+  }
+
+  Widget _buildMealModeView() {
+    return _buildNotificationSettingsView(
+      title: 'ตั้งค่าเสียงและการย้ำเตือนตามมื้ออาหาร',
+      soundValue: _mealModeSound,
+      snoozeDuration: _mealModeSnoozeDuration,
+      repeatCount: _mealModeRepeatCount,
+      onSoundChanged: (val) {
+        setState(() {
+          _mealModeSound = val;
+        });
+        _playPreview(val);
+      },
+      onSnoozeChanged: (val) {
+        setState(() {
+          _mealModeSnoozeDuration = val;
+        });
+      },
+      onRepeatChanged: (val) {
+        setState(() {
+          _mealModeRepeatCount = val;
+        });
+      },
     );
   }
 
   // ---------- UI: โหมดแจ้งเตือนตามเวลา (เหลือแค่ฟังก์ชันนี้) ----------
   Widget _buildTimeModeView() {
+    return _buildNotificationSettingsView(
+      title: 'ตั้งค่าเสียงและการย้ำเตือน',
+      soundValue: _timeModeSound,
+      snoozeDuration: _timeModeSnoozeDuration,
+      repeatCount: _timeModeRepeatCount,
+      onSoundChanged: (val) {
+        setState(() {
+          _timeModeSound = val;
+        });
+        _playPreview(val);
+      },
+      onSnoozeChanged: (val) {
+        setState(() {
+          _timeModeSnoozeDuration = val;
+        });
+      },
+      onRepeatChanged: (val) {
+        setState(() {
+          _timeModeRepeatCount = val;
+        });
+      },
+    );
+  }
+
+  Widget _buildNotificationSettingsView({
+    required String title,
+    required String? soundValue,
+    required int snoozeDuration,
+    required int repeatCount,
+    required ValueChanged<String?> onSoundChanged,
+    required ValueChanged<int> onSnoozeChanged,
+    required ValueChanged<int> onRepeatChanged,
+  }) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'ตั้งค่าเสียงและการย้ำเตือน',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 20),
 
           // 1. เลือกไฟล์เสียง + ปุ่มเล่น
           _buildSoundSelector(
             label: 'เสียงแจ้งเตือน',
-            value: _timeModeSound,
-            onChanged: (val) {
-              setState(() {
-                _timeModeSound = val;
-              });
-              _playPreview(val);
-            },
+            value: soundValue,
+            onChanged: onSoundChanged,
           ),
 
           const SizedBox(height: 24),
@@ -382,7 +513,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  '$_timeModeSnoozeDuration นาที',
+                  '$snoozeDuration นาที',
                   style: const TextStyle(
                     color: Colors.teal,
                     fontSize: 16,
@@ -398,21 +529,19 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             children: [
               Expanded(
                 child: Slider(
-                  value: _timeModeSnoozeDuration.toDouble(),
+                  value: snoozeDuration.toDouble(),
                   min: 2,
                   max: 15,
                   divisions: 13,
-                  label: '$_timeModeSnoozeDuration นาที',
+                  label: '$snoozeDuration นาที',
                   activeColor: Colors.teal,
                   onChanged: (val) {
-                    setState(() {
-                      _timeModeSnoozeDuration = val.toInt();
-                    });
+                    onSnoozeChanged(val.toInt());
                   },
                 ),
               ),
               Text(
-                '$_timeModeSnoozeDuration นาที',
+                '$snoozeDuration นาที',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ],
@@ -449,7 +578,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<int>(
-                value: _timeModeRepeatCount,
+                value: repeatCount,
                 isExpanded: true,
                 items: List.generate(3, (index) {
                   int count = index + 1;
@@ -460,9 +589,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
                 }),
                 onChanged: (val) {
                   if (val != null) {
-                    setState(() {
-                      _timeModeRepeatCount = val;
-                    });
+                    onRepeatChanged(val);
                   }
                 },
               ),
@@ -482,7 +609,7 @@ class _NortificationSettingPageState extends State<NortificationSettingPage> {
   Widget _buildSoundSelector({
     required String label,
     required String? value,
-    required Function(String?) onChanged,
+    required ValueChanged<String?> onChanged,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
